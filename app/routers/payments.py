@@ -13,7 +13,7 @@ from ..database import db_cursor, fetch_all, fetch_one
 from ..dependencies import get_current_user_id
 from ..errors import bad_request, conflict, not_found, unauthorized
 from ..response import ok
-from ..services.refund import REFUND_TYPES, create_refund
+from ..services.refund import REFUND_TYPES, approve_refund, create_refund
 from ..utils import count_total, format_datetime, local_now, make_no, money, offset_limit
 
 router = APIRouter(prefix="/api/v1", tags=["payments"])
@@ -453,6 +453,22 @@ def list_refund_requests(
             "total": total,
         }
     )
+
+
+class RefundApproveRequest(BaseModel):
+    approvedAmount: Decimal | None = Field(default=None, description="审批金额；不传则按申请金额全额批。")
+    remark: str | None = Field(default=None, description="审批备注。")
+
+
+@router.post("/refund-requests/{refund_request_id}/approve")
+def approve_refund_request(
+    body: Annotated[RefundApproveRequest, Body(description="退款审批请求体。")],
+    refund_request_id: Annotated[int, Path(description="退款申请 ID。")],
+    current_user_id: Annotated[int, Depends(get_current_user_id)],
+):
+    """单事务改退款单 + 支付 + 订单 + 明细，并在全额时关掉报名关系。"""
+    result = approve_refund(refund_request_id, current_user_id, body.approvedAmount, body.remark or "")
+    return ok(result)
 
 
 @router.get("/refund-requests/{refund_request_id}")

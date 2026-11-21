@@ -103,3 +103,86 @@ def create_refund(
         "applyAmount": float(amount),
         "orderItemId": order_item_id,
     }
+
+
+def approve_refund(
+    refund_id: int,
+    approver_user_id: int,
+    approved_amount: Any | None = None,
+    remark: str = "",
+) -> dict[str, Any]:
+    """退款审批：一个事务里改退款单、支付、订单、明细，并关掉报名关系。
+
+    全额批（金额 ≥ 明细应付）才动明细与报名；部分退款只动钱，
+    课还得让人上完——这两件事不能混。
+    """
+    refund = fetch_one("SELECT * FROM refund_request WHERE id = %s", (refund_id,))
+    if refund is None:
+        raise not_found("REFUND_NOT_FOUND", "退款申请不存在")
+    if refund["refund_status"] != "pending":
+        raise conflict("REFUND_NOT_PENDING", "这条退款不是待审状态（当前：" + str(refund["refund_status"]) + "）")
+
+    item = fetch_one("SELECT * FROM order_item WHERE id = %s", (refund["order_item_id"],))
+    if item is None:
+        raise conflict("ORDER_ITEM_NOT_FOUND", "退款对应的订单明细不存在")
+
+    amount = Decimal(str(approved_amount if approved_amount is not None else refund["apply_amount"]))
+    if amount <= 0:
+        raise bad_request("INVALID_REFUND_AMOUNT", "审批金额必须大于 0")
+    payable = Decimal(str(item["payable_amount"]))
+    if amount > payable:
+        raise conflict("REFUND_AMOUNT_EXCEEDED", "审批金额超过可退金额")
+    full = amount >= payable - Decimal("0.005")
+
+    now = local_now()
+    with db_cursor() as (_, cursor):
+        cursor.execute(
+            """
+            UPDATE refund_request
+            SET refund_status = 'refunded', approved_amount = %s, approver_user_id = %s,
+                remark = %s, approved_at = %s, refunded_at = %s, updated_at = %s
+            WHERE id = %s
+            """,
+            (amount, approver_user_id, remark or refund["remark"], now, now, now, refund_id),
+        )
+        cursor.execute(
+            "UPDATE payment_record SET payment_status = %s, refund_amount = %s, refund_at = %s, "
+            "updated_at = %s WHERE id = %s",
+            ("refunded" if full else "partial_refunded", amount, now, now, refund["payment_id"]),
+        )
+        if full:
+            cursor.execute(
+                "UPDATE order_item SET order_item_status = 'refunded', updated_at = %s WHERE id = %s",
+                (now, refund["order_item_id"]),
+            )
+        cursor.execute(
+            "SELECT COUNT(*) AS n FROM order_item WHERE order_id = %s AND order_item_status <> 'refunded'",
+            (item["order_id"],),
+        )
+        remaining = int(cursor.fetchone()["n"])
+        order_status = "refunded" if remaining == 0 else "partial_refunded"
+        cursor.execute(
+            "UPDATE `order` SET order_status = %s, updated_at = %s WHERE id = %s",
+            (order_status, now, item["order_id"]),
+        )
+        if full:
+            cursor.execute(
+                """
+                UPDATE student_cohort_rel
+                SET enroll_status = 'refunded', cancelled_at = %s, updated_at = %s
+                WHERE (order_item_id = %s OR (student_id = %s AND cohort_id = %s))
+                  AND enroll_status <> 'refunded'
+                """,
+                (now, now, refund["order_item_id"], item["student_id"], item["cohort_id"]),
+            )
+
+    return {
+        "refundRequestId": refund_id,
+        "refundNo": refund["refund_no"],
+        "refundStatusCode": "refunded",
+        "approvedAmount": float(amount),
+        "full": full,
+        "orderStatus": order_status,
+        "paymentStatus": "refunded" if full else "partial_refunded",
+        "orderItemStatus": "refunded" if full else item["order_item_status"],
+    }
