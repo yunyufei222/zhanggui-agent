@@ -52,6 +52,49 @@ uv run -m app.main  # 启动服务
 - Swagger UI：`http://127.0.0.1:8000/docs`
 - OpenAPI JSON：`http://127.0.0.1:8000/openapi.json`
 
+## 演示与验收（M4）
+
+### 一条命令起服务
+
+```bat
+start-all.bat           :: 起 main:8111 + agent:8112，各占一个窗口
+start-all.bat --check   :: 只体检（.venv / .env / 演示数据），不起服务
+```
+
+主应用 `:8111` 负责订单、支付、工单、退款、知识库；客服 Agent `:8112` 负责对话与会话。前置：MySQL 已启动、`.env` 连接参数可用、已跑过 `init_db.py` 与 `init_kb.py`。
+
+### 一条命令验十条断言
+
+```bat
+.venv\Scripts\python.exe e2e.py
+```
+
+自己起两个服务（真 HTTP，不走 TestClient），跑完整条业务链，逐条打印 PASS/FAIL，最后一行 `10/10 通过`，退出码 0/1：
+
+| # | 断言 | 覆盖 |
+|---|---|---|
+| 1 | 两服务健康、知识库 ≥20 条、六个对话状态 | A5 |
+| 2 | 下单成功（pending） | A3 |
+| 3 | 支付回调后订单与明细都是 paid | A3 |
+| 4 | 付款即建立报名关系（active） | A3 |
+| 5 | 对话查单：意图 order，回复带单号与状态 | A1 · A2 |
+| 6 | 政策问答命中知识库原文（KB 编号来自 demo.json） | A1 |
+| 7 | 弱命中转人工并落工单（SLA 话术） | A3 |
+| 8 | 工单 pending→in_progress→closed 且留痕 | A3 |
+| 9 | 退款申请落库 pending 并回 RF 单号 | A3 |
+| 10 | 审批后退款/支付/订单/明细/报名全部 refunded | A4 |
+
+### 演示对象是固定的
+
+`demo.json` 只写业务键（手机号 / `series_code` / `cohort_code`）和期望值（KB 编号、SLA 小时数、售价），**不写自增 id**。换演示学员只改这一个文件，不要在代码里挑「库里第一条」。
+
+```bat
+.venv\Scripts\python.exe seed_demo.py           :: 解析并打印，缺数据退出 1
+.venv\Scripts\python.exe seed_demo.py --write   :: 解析结果写回 resolved 段
+```
+
+`resolved` 是给人看的快照；`e2e.py` 每次运行都按业务键重新解析。
+
 ## 数据定义
 ### 基础维度
 本域用于维护全平台共享的基础主数据。
