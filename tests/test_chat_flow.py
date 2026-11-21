@@ -99,3 +99,11 @@ def test_stream_emits_done(client, user_id):
     assert "data: " in body
     payloads = [line[6:] for line in body.splitlines() if line.startswith("data: ")]
     assert payloads and json.loads(payloads[-1])["state"] in {"answering", "handoff"}
+
+
+def test_chat_reports_intent_metadata(client, user_id):
+    """T2.4：主流程要把意图、置信度、来源一并交出来（留给前端与留痕）。"""
+    data = chat(client, user_id, "退款多久到账")
+    assert data["intent"] == "policy"
+    assert 0.0 <= data["intentConfidence"] <= 1.0
+    assert data["intentSource"] in {"rule", "llm"}

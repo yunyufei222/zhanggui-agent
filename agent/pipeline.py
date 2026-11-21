@@ -12,15 +12,34 @@
 
 from __future__ import annotations
 
+import os
 import re
 from typing import Any, Iterator
 
-from app.routers.chat import answer_course, answer_progress, detect, extract_order_no, open_handoff
+from app.routers.chat import answer_course, answer_progress, extract_order_no, open_handoff
 from app.routers.kb import FALLBACK_ANSWER, STRONG_SCORE, search_rows
 
+from .intent import HttpLLM, classify
+from .skills import order as order_skill
 from .state import Session
 from .store import Store, new_session_key
-from .skills import order as order_skill
+
+
+def _build_llm() -> HttpLLM | None:
+    """只有显式打开才会真的调模型：测试与离线环境默认走纯规则。"""
+    if os.getenv("AGENT_LLM_ENABLED", "0") != "1":
+        return None
+    key = os.getenv("AGENT_LLM_API_KEY") or os.getenv("DEEPSEEK_API_KEY")
+    if not key:
+        return None
+    return HttpLLM(
+        base_url=os.getenv("AGENT_LLM_BASE_URL", "https://api.deepseek.com/v1"),
+        api_key=key,
+        model=os.getenv("AGENT_LLM_MODEL", "deepseek-flash"),
+    )
+
+
+LLM = _build_llm()
 
 POLICY_HINTS = ("多久", "时效", "规则", "政策", "流程", "能不能", "怎么退", "如何", "几天", "什么时候")
 MANUAL_HINTS = ("人工", "真人", "客服")
@@ -81,8 +100,9 @@ def handle_turn(store: Store, user_id: int, message: str, session_key: str | Non
     store.append_turn(key, "user", message)
 
     manual = any(word in message for word in MANUAL_HINTS)
-    intent = "human" if manual else detect(message)
-    store.trace(key, "intent", intent)
+    verdict = classify(message, LLM)
+    intent = "human" if manual else verdict.intent
+    store.trace(key, "intent", f"{intent} conf={verdict.confidence:.2f} src={verdict.source}")
 
     order_no = (ORDER_RE.search(message).group(0) if ORDER_RE.search(message) else "") or extract_order_no(message)
     if order_no:
@@ -124,6 +144,20 @@ def handle_turn(store: Store, user_id: int, message: str, session_key: str | Non
                 "matched": False,
             }
 
+    elif intent == "policy":
+        hit = best_kb(message)
+        if hit is not None:
+            store.trace(key, "query", f"kb:{hit['article_no']}")
+            result = {
+                "reply": hit["content"],
+                "state": "answering",
+                "need": None,
+                "matched": True,
+                "articleNo": hit["article_no"],
+            }
+        else:
+            result = _handoff(store, session, user_id, message, "ticket", session.slots.get("orderNo", ""), FALLBACK_ANSWER)
+
     elif intent == "course":
         answer = answer_course(message)
         result = {"reply": answer["text"], "state": "answering", "need": None, "matched": False}
@@ -151,4 +185,10 @@ def handle_turn(store: Store, user_id: int, message: str, session_key: str | Non
     store.trace(key, "answer", result["reply"])
     store.save_state(key, result["state"])
     store.append_turn(key, "assistant", result["reply"])
-    return {"sessionKey": key, "intent": intent, **result}
+    return {
+        "sessionKey": key,
+        "intent": intent,
+        "intentConfidence": verdict.confidence,
+        "intentSource": verdict.source,
+        **result,
+    }
