@@ -99,6 +99,25 @@ start-all.bat --check   :: 只体检（.venv / .env / 演示数据），不起�
 
 起服务后打开 `http://127.0.0.1:8112/debug`：左边对话，右边同时看会话状态、槽位、任务栈和逐条轨迹（`input → intent → query → answer → state → transition`）。同源直连，无构建步骤，改完刷新即可。
 
+### 接入大模型（可选）
+
+默认是**纯规则**（`/health` 里 `llm: off`），四类问句都能答；接 LLM 只是给「规则拿不准」的那一小撮加兜底。
+
+1. 在 `.env` 里填三行（`.env.example` 有模板）：
+
+```ini
+AGENT_LLM_ENABLED=1
+AGENT_LLM_API_KEY=sk-你的key
+AGENT_LLM_BASE_URL=https://api.deepseek.com/v1
+AGENT_LLM_MODEL=deepseek-chat
+```
+
+2. 重启服务，`GET /health` 应变成 `"llm": "on"`。
+3. 验证：发一句规则拿不准的话（例如 `付款`），响应里 `intentSource` 应为 `llm`；
+   模型超时/挂了会自动退回规则，并在响应里带 `degraded: true`（见 T2.14）。
+
+任何 OpenAI 兼容网关都行（`/chat/completions`）。不填 key 也不会报错，就是一直走规则。
+
 ### 技能阈值与话术在哪
 
 `agent/skills.yaml`：澄清阈值（`multi_min` / `ambiguous_below`）、工单 SLA（`sla_hours`）、退款类型关键词、课程咨询的浏览/噪声正则、各句话术模板。改完重启生效；写坏了启动直接报错（`/health` 会显示 `skills: ok`）。测试里可以把 `AGENT_SKILLS_CONFIG` 指向临时文件验证改配置真的改了行为。
