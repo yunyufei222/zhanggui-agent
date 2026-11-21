@@ -1539,3 +1539,21 @@ CREATE TABLE ugc_moderation_task (
         moderator_user_id
     ) REFERENCES sys_user (id)
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT = '内容审核任务表';
+
+
+-- 客服政策知识库（T1.1）：AI 客服的「只读政策源」，检索走 SQL LIKE（D4=A）
+CREATE TABLE kb_article (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    article_no VARCHAR(32) NOT NULL,
+    category VARCHAR(32) NOT NULL,
+    title VARCHAR(128) NOT NULL,
+    keywords VARCHAR(255) NOT NULL DEFAULT '',
+    content TEXT NOT NULL,
+    priority INT NOT NULL DEFAULT 100,
+    yn TINYINT NOT NULL DEFAULT 1,
+    created_at DATETIME NOT NULL,
+    updated_at DATETIME NOT NULL,
+    UNIQUE KEY uk_kb_article_no (article_no),
+    KEY idx_kb_category (category),
+    KEY idx_kb_yn_priority (yn, priority)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT = '客服政策知识库';
