@@ -9,8 +9,10 @@ from __future__ import annotations
 import json
 from typing import Annotated, Any, Iterator
 
+from pathlib import Path
+
 from fastapi import FastAPI, Header, HTTPException
-from fastapi.responses import StreamingResponse
+from fastapi.responses import HTMLResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 from .config import VERSION
@@ -21,6 +23,13 @@ from app.database import fetch_one
 from app.response import ok
 
 app = FastAPI(title="Edu Agent", version=VERSION)
+WEB_DIR = Path(__file__).with_name("web")
+
+
+@app.get("/debug", response_class=HTMLResponse, include_in_schema=False)
+def debug_page() -> str:
+    """前端调试页（T3.1）：对话 / 槽位 / 轨迹一屏看完，同源直连本服务，没有构建步骤。"""
+    return (WEB_DIR / "debug.html").read_text(encoding="utf-8")
 
 
 @app.get("/health")

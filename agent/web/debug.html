@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>客服 Agent · 调试台（对话 / 槽位 / 轨迹）</title>
+<style>
+  :root {
+    --bg: #0f1115;
+    --panel: #171a21;
+    --panel-2: #1f2430;
+    --line: #2b3240;
+    --text: #e6e9ef;
+    --muted: #8b94a7;
+    --accent: #4f9cf9;
+    --ok: #3ecf8e;
+    --warn: #f5a524;
+    --err: #f26d6d;
+    --user: #24405f;
+    --bot: #1f2430;
+    font-family: "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); height: 100vh; display: flex; flex-direction: column; }
+
+  header {
+    display: flex; align-items: center; gap: 12px; padding: 10px 16px;
+    background: var(--panel); border-bottom: 1px solid var(--line);
+  }
+  header h1 { font-size: 15px; margin: 0; font-weight: 600; letter-spacing: .3px; }
+  header .spacer { flex: 1; }
+  header label { font-size: 12px; color: var(--muted); display: flex; align-items: center; gap: 6px; }
+  input, button, select {
+    background: var(--panel-2); color: var(--text); border: 1px solid var(--line);
+    border-radius: 8px; padding: 6px 10px; font-size: 13px; outline: none;
+  }
+  input:focus, button:focus { border-color: var(--accent); }
+  button { cursor: pointer; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #07111f; font-weight: 600; }
+  button.ghost { background: transparent; }
+  .badge {
+    font-size: 12px; padding: 3px 8px; border-radius: 999px;
+    background: var(--panel-2); border: 1px solid var(--line); color: var(--muted);
+  }
+  .badge.ok { color: var(--ok); border-color: #245c45; }
+  .badge.err { color: var(--err); border-color: #5c2424; }
+  .mono { font-family: ui-monospace, "Cascadia Code", Consolas, monospace; }
+
+  main { flex: 1; display: grid; grid-template-columns: 1fr 400px; min-height: 0; }
+
+  /* 左：对话 */
+  #chatPane { display: flex; flex-direction: column; min-height: 0; border-right: 1px solid var(--line); }
+  #messages { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 10px; }
+  .msg { max-width: 78%; padding: 9px 12px; border-radius: 12px; line-height: 1.55; white-space: pre-wrap; word-break: break-word; font-size: 14px; }
+  .msg.user { align-self: flex-end; background: var(--user); border-bottom-right-radius: 4px; }
+  .msg.bot { align-self: flex-start; background: var(--bot); border: 1px solid var(--line); border-bottom-left-radius: 4px; }
+  .msg .meta { display: block; margin-top: 6px; font-size: 11px; color: var(--muted); }
+  .msg.err { border-color: #5c2424; color: #ffb4b4; }
+
+  #composer { display: flex; gap: 8px; padding: 12px 16px; border-top: 1px solid var(--line); background: var(--panel); }
+  #composer input { flex: 1; }
+
+  /* 右：面板 */
+  #side { overflow-y: auto; padding: 12px 14px; display: flex; flex-direction: column; gap: 12px; background: var(--panel); }
+  .card { border: 1px solid var(--line); border-radius: 10px; background: var(--panel-2); overflow: hidden; }
+  .card h2 { font-size: 12px; margin: 0; padding: 8px 12px; color: var(--muted); font-weight: 600;
+             letter-spacing: .5px; border-bottom: 1px solid var(--line); display: flex; justify-content: space-between; }
+  .card .body { padding: 10px 12px; font-size: 13px; }
+  .kv { display: grid; grid-template-columns: 96px 1fr; gap: 4px 8px; }
+  .kv dt { color: var(--muted); font-size: 12px; }
+  .kv dd { margin: 0; word-break: break-all; }
+  .pill { display: inline-block; padding: 1px 7px; border-radius: 999px; font-size: 12px; border: 1px solid var(--line); }
+  .pill.s1 { color: #9ad0ff; border-color: #2b4a6b; }
+  .pill.s2 { color: var(--warn); border-color: #5c4a24; }
+
+  #trace { max-height: 46vh; overflow-y: auto; padding: 8px 10px; display: flex; flex-direction: column; gap: 4px; }
+  .row { display: grid; grid-template-columns: 78px 1fr; gap: 8px; font-size: 12px; line-height: 1.45; }
+  .row .step { color: var(--muted); text-align: right; font-family: ui-monospace, Consolas, monospace; }
+  .row .val { word-break: break-word; }
+  .step-input .step { color: #9ad0ff; }
+  .step-intent .step { color: #c9a7ff; }
+  .step-answer .step { color: var(--ok); }
+  .step-transition .step { color: var(--warn); }
+  .step-handoff .step { color: var(--err); }
+  .step-clarify .step { color: #7fd7ff; }
+  .empty { color: var(--muted); font-size: 12px; padding: 6px 0; }
+</style>
+</head>
+<body>
+<header>
+  <h1>客服 Agent · 调试台</h1>
+  <span class="badge" id="sessionBadge">未开会话</span>
+  <span class="badge ok" id="healthBadge">连接中…</span>
+  <span class="spacer"></span>
+  <label>userId <input id="userId" class="mono" value="161" size="8" /></label>
+  <button class="ghost" id="newSession">新会话</button>
+  <button class="ghost" id="refresh">刷新</button>
+</header>
+
+<main>
+  <section id="chatPane">
+    <div id="messages"></div>
+    <div id="composer">
+      <input id="input" placeholder="说点什么，例如：查订单 ORD... / 退款多久到账 / 我要退款" autocomplete="off" />
+      <button class="primary" id="send">发送</button>
+    </div>
+  </section>
+
+  <aside id="side">
+    <div class="card">
+      <h2>会话状态 <span class="mono" id="stateAt"></span></h2>
+      <div class="body">
+        <dl class="kv" id="stateKv"><dt>状态</dt><dd>—</dd></dl>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>槽位 <span id="slotCount" class="mono"></span></h2>
+      <div class="body"><dl class="kv" id="slots"><dt>—</dt><dd>还没有槽位</dd></dl></div>
+    </div>
+
+    <div class="card">
+      <h2>轨迹 <span id="traceCount" class="mono"></span></h2>
+      <div id="trace"><div class="empty">发送第一条消息后，这里会出现 input → intent → answer → transition 的完整留痕。</div></div>
+    </div>
+  </aside>
+</main>
+
+<script>
+(() => {
+  "use strict";
+  const $ = (id) => document.getElementById(id);
+  const API = "";                     // 同源：这个页面就是 agent 应用在提供
+  let sessionKey = null;
+  let busy = false;
+
+  const esc = (text) => String(text ?? "").replace(/[&<>"']/g, (c) =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+  async function api(path, options) {
+    const response = await fetch(API + path, options);
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(payload.detail || payload.message || ("HTTP " + response.status));
+    }
+    return payload.data ?? payload;
+  }
+
+  function bubble(role, text, meta) {
+    const node = document.createElement("div");
+    node.className = "msg " + role;
+    node.innerHTML = esc(text) + (meta ? `<span class="meta">${esc(meta)}</span>` : "");
+    $("messages").appendChild(node);
+    $("messages").scrollTop = $("messages").scrollHeight;
+  }
+
+  function renderState(snapshot) {
+    const kv = $("stateKv");
+    // 后端的快照字段是 intent/intention 与 slots，页面只认真实存在的字段
+    // 后端把置信度也拼在 intent 里（"course conf=1.00 src=rule"），面板只显示意图名
+    const rawIntent = snapshot.intent || snapshot.intention || "—";
+    const intent = String(rawIntent).split(" ")[0];
+    const need = (snapshot.slots && snapshot.slots.need) || "—";
+    kv.innerHTML = `
+      <dt>状态</dt><dd><span class="pill s1">${esc(snapshot.state)}</span></dd>
+      <dt>最近意图</dt><dd><span class="mono">${esc(intent)}</span></dd>
+      <dt>待补</dt><dd>${esc(need)}</dd>
+      <dt>更新</dt><dd class="mono">${esc(snapshot.updatedAt || "—")}</dd>`;
+
+    const slots = snapshot.slots || {};
+    const keys = Object.keys(slots).filter((key) => key !== "taskStack");
+    $("slotCount").textContent = keys.length ? `(${keys.length})` : "";
+    $("slots").innerHTML = keys.length
+      ? keys.map((key) => `<dt class="mono">${esc(key)}</dt><dd>${esc(slots[key])}</dd>`).join("")
+      : "<dt>—</dt><dd>还没有槽位</dd>";
+
+    const stack = snapshot.taskStack || [];
+    if (stack.length) {
+      $("stateKv").innerHTML += `<dt>任务栈</dt><dd>${stack
+        .map((task) => `<span class="pill s2">${esc(task.kind)}</span>`).join(" ")}</dd>`;
+    }
+    $("stateAt").textContent = "";
+  }
+
+  function renderTrace(rows) {
+    const box = $("trace");
+    $("traceCount").textContent = rows.length ? `(${rows.length})` : "";
+    if (!rows.length) {
+      box.innerHTML = '<div class="empty">还没有轨迹。</div>';
+      return;
+    }
+    box.innerHTML = rows
+      .map((row) => {
+        const step = esc(row.step);
+        const time = String(row.at || "").slice(11, 19);
+        return `<div class="row step-${step}">
+          <span class="step" title="${time}">${step}</span>
+          <span class="val">${esc(row.value)}</span>
+        </div>`;
+      })
+      .join("");
+    box.scrollTop = box.scrollHeight;
+  }
+
+  function renderMessages(rows) {
+    if (!rows.length) {
+      $("messages").innerHTML = '<div class="empty">还没有对话。</div>';
+      return;
+    }
+    $("messages").innerHTML = "";
+    rows.forEach((row) => {
+      const role = row.role === "user" ? "user" : "bot";
+      bubble(role, row.content, `#${row.turnNo} · ${row.role}`);
+    });
+    $("messages").scrollTop = $("messages").scrollHeight;
+  }
+
+  async function refresh() {
+    if (!sessionKey) return;
+    const [state, messages, trace] = await Promise.all([
+      api(`/sessions/${sessionKey}/state`),
+      api(`/sessions/${sessionKey}/messages?limit=50`),
+      api(`/sessions/${sessionKey}/trace?limit=200`),
+    ]);
+    renderState(state);
+    renderMessages(messages.messages || []);
+    renderTrace(trace.rows || []);
+  }
+
+  async function health() {
+    try {
+      const data = await api("/health");
+      const badge = $("healthBadge");
+      const good = data.ok && data.db === "up";
+      badge.textContent = good ? `服务正常 · 知识库 ${data.kbArticles} 条` : "服务异常";
+      badge.className = "badge " + (good ? "ok" : "err");
+    } catch (error) {
+      $("healthBadge").textContent = "连不上服务";
+      $("healthBadge").className = "badge err";
+    }
+  }
+
+  async function send() {
+    const input = $("input");
+    const text = input.value.trim();
+    if (!text || busy) return;
+    busy = true;
+    input.value = "";
+    bubble("user", text);
+
+    try {
+      const data = await api("/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId: Number($("userId").value || 0), message: text, sessionKey }),
+      });
+      sessionKey = data.sessionKey;
+      $("sessionBadge").textContent = "会话 " + sessionKey;
+      $("sessionBadge").className = "badge ok";
+
+      const meta = [
+        data.intent && `意图 ${data.intent}`,
+        data.action && `action=${data.action}`,
+        data.clarifyKind && `澄清 ${data.clarifyKind}`,
+        data.state && `状态 ${data.state}`,
+      ].filter(Boolean).join(" · ");
+      bubble("bot", data.reply, meta);
+      await refresh();
+    } catch (error) {
+      bubble("bot err", "请求失败：" + error.message);
+    } finally {
+      busy = false;
+    }
+  }
+
+  $("send").addEventListener("click", send);
+  $("input").addEventListener("keydown", (event) => {
+    if (event.key === "Enter" && !event.shiftKey) {
+      event.preventDefault();
+      send();
+    }
+  });
+  $("refresh").addEventListener("click", () => refresh().catch((error) => bubble("bot err", error.message)));
+  $("newSession").addEventListener("click", () => {
+    sessionKey = null;
+    $("sessionBadge").textContent = "未开会话";
+    $("sessionBadge").className = "badge";
+    $("messages").innerHTML = "";
+    $("slots").innerHTML = "<dt>—</dt><dd>还没有槽位</dd>";
+    $("trace").innerHTML = '<div class="empty">发送第一条消息后，这里会出现完整留痕。</div>';
+    $("stateKv").innerHTML = "<dt>状态</dt><dd>—</dd>";
+  });
+
+  health();
+  setInterval(health, 30000);
+})();
+</script>
+</body>
+</html>
