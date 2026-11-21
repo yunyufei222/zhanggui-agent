@@ -8,6 +8,7 @@ dependencies = [
   "pymysql>=1.1.2",
   "PyYAML>=6.0",
   "pytest>=8.4.1",
+  "pytest-cov>=7.0",
   "python-dotenv>=1.1.1",
   "rich>=14.2.0",
   "sqlacodegen>=4.0.3",
