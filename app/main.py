@@ -17,6 +17,7 @@ from .routers.courses import router as courses_router
 from .routers.enrollments import router as enrollments_router
 from .routers.favorites import router as favorites_router
 from .routers.interactions import router as interactions_router
+from .routers.kb import router as kb_router
 from .routers.orders import router as orders_router
 from .routers.payments import router as payments_router
 from .routers.study import router as study_router
@@ -36,6 +37,7 @@ OPENAPI_TAGS = [
     {"name": "study", "description": "10. 课次、视频、作业、考试"},
     {"name": "interactions", "description": "11. 互动与评价"},
     {"name": "tickets", "description": "12. 工单与售后服务"},
+    {"name": "kb", "description": "13. 客服政策知识库（检索）"},
 ]
 
 app = FastAPI(title="Edu Data API", version="0.1.0", openapi_tags=OPENAPI_TAGS)
@@ -53,6 +55,7 @@ app.include_router(enrollments_router)
 app.include_router(study_router)
 app.include_router(interactions_router)
 app.include_router(tickets_router)
+app.include_router(kb_router)
 
 
 @app.exception_handler(AppError)
