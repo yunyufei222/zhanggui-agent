@@ -95,6 +95,10 @@ start-all.bat --check   :: 只体检（.venv / .env / 演示数据），不起�
 
 `resolved` 是给人看的快照；`e2e.py` 每次运行都按业务键重新解析。
 
+### 技能阈值与话术在哪
+
+`agent/skills.yaml`：澄清阈值（`multi_min` / `ambiguous_below`）、工单 SLA（`sla_hours`）、退款类型关键词、课程咨询的浏览/噪声正则、各句话术模板。改完重启生效；写坏了启动直接报错（`/health` 会显示 `skills: ok`）。测试里可以把 `AGENT_SKILLS_CONFIG` 指向临时文件验证改配置真的改了行为。
+
 ## 数据定义
 ### 基础维度
 本域用于维护全平台共享的基础主数据。

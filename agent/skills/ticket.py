@@ -14,8 +14,15 @@ from typing import Any
 from app.database import db_cursor, fetch_one
 from app.utils import local_now, make_no
 
-TYPE_CN = {"after_sales": "售后", "complaint": "投诉", "refund": "退款"}
-SLA_HOURS = 4
+from ..skill_config import config
+
+# 类型中文名与 SLA 来自 agent/skills.yaml（T2.15）
+def type_cn() -> dict[str, str]:
+    return dict(config.get("ticket.type_cn", {}))
+
+
+def sla_hours() -> int:
+    return int(config.get("ticket.sla_hours", 4))
 
 
 def find_order_item(user_id: int, order_no: str) -> dict[str, Any] | None:

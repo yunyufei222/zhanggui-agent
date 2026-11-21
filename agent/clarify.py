@@ -13,6 +13,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from .skill_config import config
+
 KIND_CN = {
     "order": "订单",
     "refund": "退款",
@@ -24,9 +26,21 @@ KIND_CN = {
     "unknown": "其他",
 }
 
-MULTI_MIN = 2.0
-AMBIGUOUS_BELOW = 0.5
-NEGATIONS = ("不退", "别退", "不想退", "不用退", "先不退")
+# 阈值与词表来自 agent/skills.yaml（T2.15），不再写死在代码里
+def multi_min() -> float:
+    return float(config.get("clarify.multi_min", 2.0))
+
+
+def ambiguous_below() -> float:
+    return float(config.get("clarify.ambiguous_below", 0.5))
+
+
+def negations() -> list[str]:
+    return list(config.get("clarify.negations", []))
+
+
+def refund_words() -> list[str]:
+    return list(config.get("clarify.refund_words", ["退款", "退钱", "退课"]))
 
 
 @dataclass
@@ -44,25 +58,29 @@ def decide(
     has_order_no: bool = False,
 ) -> Clarify | None:
     # 1. 冲突：想退又不想退
-    mentions_refund = any(word in message for word in ("退款", "退钱", "退课"))
-    if mentions_refund and any(word in message for word in NEGATIONS):
-        return Clarify("conflict", "你是想申请退款，还是先不退了？我按你说的办。")
+    mentions_refund = any(word in message for word in refund_words())
+    if mentions_refund and any(word in message for word in negations()):
+        return Clarify("conflict", config.text("clarify.texts.conflict"))
 
     # 2. 多意图：两个意图都够强；带单号时「订单」只是指路，不算第二件事
-    strong = [(name, score) for name, score, _ in ranked if score >= MULTI_MIN]
+    strong = [(name, score) for name, score, _ in ranked if score >= multi_min()]
     if has_order_no:
         strong = [(name, score) for name, score in strong if name != "order"]
     if len(strong) >= 2:
         first, second = strong[0][0], strong[1][0]
         return Clarify(
             "multi_intent",
-            f"这句话里有两件事：{KIND_CN.get(first, first)}和{KIND_CN.get(second, second)}。先办哪一件？",
+            config.text(
+                "clarify.texts.multi_intent",
+                first=KIND_CN.get(first, first),
+                second=KIND_CN.get(second, second),
+            ),
         )
 
     # 3. 模糊：规则只蹭到一个弱词，硬答就是猜
-    if intent not in ("unknown", "greeting") and 0 < confidence < AMBIGUOUS_BELOW:
+    if intent not in ("unknown", "greeting") and 0 < confidence < ambiguous_below():
         return Clarify(
             "ambiguous",
-            f"你是指{KIND_CN.get(intent, intent)}相关的事吗？能再说具体一点吗——比如哪门课、哪个单号。",
+            config.text("clarify.texts.ambiguous", kind=KIND_CN.get(intent, intent)),
         )
     return None

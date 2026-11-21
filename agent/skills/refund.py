@@ -12,15 +12,8 @@ from app.database import fetch_all
 from app.errors import AppError
 from app.services.refund import create_refund
 
+from ..skill_config import config
 from .order import STATUS_CN
-
-TYPE_HINTS = (
-    ("不满", "course_unsatisfied"),
-    ("不好", "course_unsatisfied"),
-    ("时间冲突", "schedule_conflict"),
-    ("没时间", "schedule_conflict"),
-    ("重复", "duplicate_purchase"),
-)
 
 
 def items_of(user_id: int, order_no: str) -> list[dict[str, Any]]:
@@ -37,10 +30,11 @@ def items_of(user_id: int, order_no: str) -> list[dict[str, Any]]:
 
 
 def _refund_type(message: str) -> str:
-    for word, kind in TYPE_HINTS:
+    hints = config.get("refund.hints", {}) or {}
+    for word, kind in hints.items():
         if word in message:
-            return kind
-    return "personal_reason"
+            return str(kind)
+    return str(config.get("refund.default_type", "personal_reason"))
 
 
 def apply(user_id: int, order_no: str, message: str) -> dict[str, Any]:

@@ -6,6 +6,7 @@ dependencies = [
   "loguru>=0.7.3",
   "pydantic>=2.12.5",
   "pymysql>=1.1.2",
+  "PyYAML>=6.0",
   "pytest>=8.4.1",
   "python-dotenv>=1.1.1",
   "rich>=14.2.0",

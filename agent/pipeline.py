@@ -140,14 +140,14 @@ def _handoff(store: Store, session: Session, user_id: int, message: str, reason:
         ticket = ticket_skill.open_ticket(
             user_id,
             order_no or "",
-            title=(ticket_skill.TYPE_CN.get(reason, reason) + "｜" + message[:40]),
+            title=(ticket_skill.type_cn().get(reason, reason) + "｜" + message[:40]),
             content=(message + ("（订单 " + order_no + "）" if order_no else "")),
             ticket_type="after_sales" if reason != "refund" else "refund",
         )
     except Exception:
         ticket = None
     if ticket is not None:
-        suffix = f"\n已为你建工单 {ticket['ticketNo']}，客服会在 {ticket_skill.SLA_HOURS} 小时内回复。"
+        suffix = f"\n已为你建工单 {ticket['ticketNo']}，客服会在 {ticket_skill.sla_hours()} 小时内回复。"
         store.trace(session.session_id, "ticket", ticket["ticketNo"])
     else:
         suffix = HANDOFF_SUFFIX

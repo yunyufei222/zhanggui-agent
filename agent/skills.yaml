@@ -1,0 +1,41 @@
+# 技能配置（T2.15）：阈值、话术、类型映射都在这里。
+# 改这句话术不用改代码、不用重跑全量测试；坏配置会在启动时报错，而不是线上说话变哑。
+version: 1
+
+clarify:
+  # 一句话里几个强证据才算「多意图」；置信度低于多少算「模糊」
+  multi_min: 2.0
+  ambiguous_below: 0.5
+  negations: [不退, 别退, 不想退, 不用退, 先不退]
+  refund_words: [退款, 退钱, 退课]
+  texts:
+    conflict: "你是想申请退款，还是先不退了？我按你说的办。"
+    multi_intent: "这句话里有两件事：{first}和{second}。先办哪一件？"
+    ambiguous: "你是指{kind}相关的事吗？能再说具体一点吗——比如哪门课、哪个单号。"
+
+ticket:
+  sla_hours: 4
+  type_cn:
+    after_sales: 售后
+    complaint: 投诉
+    refund: 退款
+  # 转人工时把用户这句话归到哪类工单
+  reason_by_intent:
+    refund: refund
+    human: complaint
+    ticket: after_sales
+
+refund:
+  default_type: personal_reason
+  hints:
+    不满: course_unsatisfied
+    不好: course_unsatisfied
+    时间冲突: schedule_conflict
+    没时间: schedule_conflict
+    重复: duplicate_purchase
+
+course:
+  # 浏览型问句（没给具体课名）走列表
+  browse: "有什么|有哪些|哪些课|都有|啥课|什么课|推荐"
+  # 匹配课程名前先剔掉的噪声词
+  noise: "多少钱|价格|学费|费用|怎么样|怎么报|介绍|讲讲|我想|我要|帮我|查一下|查询|请问|课程|这课|一门|的课"

@@ -12,6 +12,8 @@ from typing import Any
 
 from app.database import fetch_all, fetch_one
 
+from ..skill_config import config
+
 DELIVERY_CN = {
     "online_live": "直播",
     "online_recorded": "录播",
@@ -29,14 +31,18 @@ STATUS_CN = {
     "refunded": "已退款",
 }
 
-BROWSE = re.compile(r"有什么|有哪些|哪些课|都有|啥课|什么课|推荐")
-NOISE = re.compile(r"多少钱|价格|学费|费用|怎么样|怎么报|介绍|讲讲|我想|我要|帮我|查一下|查询|请问|课程|这课|一门|的课")
+def _browse() -> re.Pattern[str]:
+    return re.compile(str(config.get("course.browse", "有什么|哪些")))
+
+
+def _noise() -> re.Pattern[str]:
+    return re.compile(str(config.get("course.noise", "多少钱|价格")))
 SPLIT = re.compile(r"[\s，。,.!?？!、]+")
 
 
 def _terms(message: str) -> list[str]:
     """把问句切成 2~4 字的片段，用来和课程名做重叠打分（不要求整句命中）。"""
-    cleaned = NOISE.sub(" ", message)
+    cleaned = _noise().sub(" ", message)
     terms: list[str] = []
     for chunk in SPLIT.split(cleaned):
         chunk = chunk.strip()
@@ -99,6 +105,7 @@ def _owned(user_id: int, series_code: str) -> dict[str, Any] | None:
         JOIN series_cohort AS c ON c.id = i.cohort_id
         JOIN series AS s ON s.id = c.series_id
         WHERE o.user_id = %s AND s.series_code = %s
+          AND o.order_status NOT IN ('pending', 'cancelled')
         ORDER BY o.id DESC
         LIMIT 1
         """,
@@ -151,7 +158,7 @@ def consult(user_id: int, message: str) -> dict[str, Any]:
                 return {"text": "\n".join(lines), "items": best}
             return {"text": _describe(best[0], user_id), "items": [best[0]]}
 
-        if terms and not BROWSE.search(message):
+        if terms and not _browse().search(message):
             return {
                 "text": "没找到匹配的课程。可以说得更具体些，比如「通用编程入门班」；或者问「有什么课程」看全部。",
                 "items": [],

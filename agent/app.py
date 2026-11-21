@@ -37,10 +37,18 @@ def health() -> dict[str, object]:
         db_up = True
     except Exception:  # 数据库挂了要让 /health 说真话，不是 500
         db_up = False
+    from .skill_config import ConfigError, config as skill_config
+
+    try:
+        skills = "ok" if skill_config.get("version") else "empty"
+    except ConfigError:  # pragma: no cover —— 配置坏了启动就会炸，这里只是兜底
+        skills = "broken"
+
     return {
         "ok": db_up,
         "version": VERSION,
         "db": "up" if db_up else "down",
+        "skills": skills,
         "kbArticles": kb_articles,
         "openSessions": open_sessions,
         "states": list(STATES),
