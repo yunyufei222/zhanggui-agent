@@ -43,16 +43,24 @@ def recent_numbers(user_id: int, limit: int = 3) -> list[str]:
     return [row["order_no"] for row in rows]
 
 
+def _money(value: Any) -> float:
+    """待支付订单的 paid_amount 是 NULL——不能直接 float()。"""
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return 0.0
+
+
 def describe(order: dict[str, Any], items: list[dict[str, Any]]) -> str:
     status = STATUS_CN.get(str(order["order_status"]), str(order["order_status"]))
     lines = [
         f"订单 {order['order_no']} 状态 {status}（{order['order_status']}），"
-        f"应付 {float(order['payable_amount']):.2f} 元，已付 {float(order['paid_amount']):.2f} 元，共 {len(items)} 门："
+        f"应付 {_money(order['payable_amount']):.2f} 元，已付 {_money(order['paid_amount']):.2f} 元，共 {len(items)} 门："
     ]
     for item in items:
         item_status = STATUS_CN.get(str(item["order_item_status"]), str(item["order_item_status"]))
         lines.append(
-            f"· {item['item_name']}（{item_status}）¥{float(item['payable_amount']):.2f}"
+            f"· {item['item_name']}（{item_status}）¥{_money(item['payable_amount']):.2f}"
             f"，服务期 {int(item['service_period_days'])} 天"
         )
     return "\n".join(lines)

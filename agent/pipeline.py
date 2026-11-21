@@ -21,6 +21,7 @@ from app.routers.kb import FALLBACK_ANSWER, STRONG_SCORE, search_rows
 
 from .intent import HttpLLM, classify
 from .skills import order as order_skill
+from .skills import ticket as ticket_skill
 from .state import Session
 from .tasks import KIND_CN, TaskStack
 from .store import Store, new_session_key
@@ -103,7 +104,33 @@ def _handoff(store: Store, session: Session, user_id: int, message: str, reason:
     store.put_slot(session.session_id, "lastIntent", "handoff", "ask")
     handoff_id = open_handoff(user_id, session.session_id, reason, order_no or "", message)
     store.trace(session.session_id, "handoff", str(handoff_id))
-    return {"reply": reply + HANDOFF_SUFFIX, "state": "handoff", "handoffId": handoff_id, "need": None, "matched": False}
+
+    # T2.10：有单就落一张 service_ticket，把单号给它；没单不硬造。
+    ticket = None
+    try:
+        ticket = ticket_skill.open_ticket(
+            user_id,
+            order_no or "",
+            title=(ticket_skill.TYPE_CN.get(reason, reason) + "｜" + message[:40]),
+            content=(message + ("（订单 " + order_no + "）" if order_no else "")),
+            ticket_type="after_sales" if reason != "refund" else "refund",
+        )
+    except Exception:
+        ticket = None
+    if ticket is not None:
+        suffix = f"\n已为你建工单 {ticket['ticketNo']}，客服会在 {ticket_skill.SLA_HOURS} 小时内回复。"
+        store.trace(session.session_id, "ticket", ticket["ticketNo"])
+    else:
+        suffix = HANDOFF_SUFFIX
+
+    return {
+        "reply": reply + suffix,
+        "state": "handoff",
+        "handoffId": handoff_id,
+        "ticketNo": ticket["ticketNo"] if ticket else None,
+        "need": None,
+        "matched": False,
+    }
 
 
 def handle_turn(store: Store, user_id: int, message: str, session_key: str | None = None) -> dict[str, Any]:
