@@ -19,9 +19,12 @@ app = FastAPI(title="Edu Agent", version=VERSION)
 def health() -> dict[str, object]:
     db_up = False
     kb_articles = 0
+    open_sessions = 0
     try:
         row = fetch_one("SELECT COUNT(*) AS total FROM kb_article WHERE yn = 1")
         kb_articles = int(row["total"]) if row else 0
+        live = fetch_one("SELECT COUNT(*) AS total FROM dialogue_session WHERE status = 'open'")
+        open_sessions = int(live["total"]) if live else 0
         fetch_one("SELECT 1 AS one")
         db_up = True
     except Exception:  # 数据库挂了要让 /health 说真话，不是 500
@@ -31,6 +34,7 @@ def health() -> dict[str, object]:
         "version": VERSION,
         "db": "up" if db_up else "down",
         "kbArticles": kb_articles,
+        "openSessions": open_sessions,
         "states": list(STATES),
         "transitions": {k: list(v) for k, v in TRANSITIONS.items()},
     }
