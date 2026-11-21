@@ -16,6 +16,7 @@ import os
 import re
 from typing import Any, Iterator
 
+from app.database import db_cursor, fetch_one
 from app.routers.chat import answer_course, extract_order_no, open_handoff
 from app.routers.kb import FALLBACK_ANSWER, STRONG_SCORE, search_rows
 
@@ -101,6 +102,36 @@ def best_kb(message: str) -> dict[str, Any] | None:
     return winner["row"]
 
 
+class _Verdict:
+    intent = "handoff_reply"
+    confidence = 1.0
+    source = "handoff"
+    hits: list[str] = []
+    fallback = False
+
+
+def verdict_stub() -> _Verdict:
+    return _Verdict()
+
+
+def take_handoff_answer(session_key: str) -> dict[str, Any] | None:
+    """把人工已回复、还没播报的工单取出来（FIFO），并标记为已送达。
+
+    主应用那边有自己的 /api/v1/chat，但用户现在走的是 agent 的 /chat——
+    不在这里播报，人工回的话就永远躺在表里（T_M2.2 的闭环断在这一步）。
+    """
+    row = fetch_one(
+        "SELECT id, reason, answer, answered_by, answered_at FROM dialogue_handoff "
+        "WHERE session_key = %s AND status = 'answered' ORDER BY id LIMIT 1",
+        (session_key,),
+    )
+    if row is None:
+        return None
+    with db_cursor() as (_, cursor):
+        cursor.execute("UPDATE dialogue_handoff SET status = 'delivered' WHERE id = %s", (row["id"],))
+    return dict(row)
+
+
 def _finish(
     store: Store,
     key: str,
@@ -184,6 +215,21 @@ def handle_turn(
         session = store.load(key)
 
     prev_state = session.state
+    answered = take_handoff_answer(key)
+    if answered is not None:
+        reply = f"【人工回复 · {answered['reason']}】{answered['answer']}"
+        store.trace(key, "handoff", f"播报人工回复 #{answered['id']} by {answered['answered_by'] or '?'}")
+        store.append_turn(key, "user", message)
+        return _finish(
+            store, key, "handoff_reply", verdict_stub(), {
+                "reply": reply,
+                "state": "answering",
+                "need": None,
+                "matched": True,
+                "handoffId": int(answered["id"]),
+            }, TaskStack.from_json(session.slots.get("taskStack")),
+        )
+
     store.trace(key, "input", message)
     store.append_turn(key, "user", message)
 
