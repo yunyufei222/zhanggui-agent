@@ -22,6 +22,7 @@ from app.routers.kb import FALLBACK_ANSWER, STRONG_SCORE, search_rows
 from .intent import HttpLLM, classify
 from .skills import order as order_skill
 from .state import Session
+from .tasks import KIND_CN, TaskStack
 from .store import Store, new_session_key
 
 
@@ -44,6 +45,8 @@ LLM = _build_llm()
 POLICY_HINTS = ("多久", "时效", "规则", "政策", "流程", "能不能", "怎么退", "如何", "几天", "什么时候")
 MANUAL_HINTS = ("人工", "真人", "客服")
 HANDOFF_SUFFIX = "\n已经帮你转人工，客服会按订单实际情况核实后回复。"
+CANCEL_HINTS = ("算了", "不查了", "不办了", "取消", "退出", "先不看", "不买了")
+RESUME_HINTS = ("继续刚才", "回到刚才", "刚才那个", "接着刚才", "继续上一个")
 # 库里的单号带连字符（ORD-xxxx），router 那个正则只认纯字母数字，这里放宽
 ORDER_RE = re.compile(r"ORD[0-9A-Za-z-]{3,}", re.I)
 
@@ -81,6 +84,21 @@ def best_kb(message: str) -> dict[str, Any] | None:
     return best[1] if best else None
 
 
+def _finish(store: Store, key: str, intent: str, verdict, result: dict[str, Any], stack: TaskStack) -> dict[str, Any]:
+    """一轮的收尾：栈落盘 → answer → state → 助手那轮。"""
+    store.put_slot(key, "taskStack", stack.to_json(), "ask")
+    store.trace(key, "answer", result["reply"])
+    store.save_state(key, result["state"])
+    store.append_turn(key, "assistant", result["reply"])
+    return {
+        "sessionKey": key,
+        "intent": intent,
+        "intentConfidence": verdict.confidence,
+        "intentSource": verdict.source,
+        **result,
+    }
+
+
 def _handoff(store: Store, session: Session, user_id: int, message: str, reason: str, order_no: str, reply: str) -> dict[str, Any]:
     store.put_slot(session.session_id, "lastIntent", "handoff", "ask")
     handoff_id = open_handoff(user_id, session.session_id, reason, order_no or "", message)
@@ -108,6 +126,47 @@ def handle_turn(store: Store, user_id: int, message: str, session_key: str | Non
     if order_no:
         store.put_slot(key, "orderNo", order_no, "user")
         session.slots["orderNo"] = order_no
+
+    stack = TaskStack.from_json(session.slots.get("taskStack"))
+    control = None
+    if any(word in message for word in CANCEL_HINTS):
+        control = "cancel"
+    elif any(word in message for word in RESUME_HINTS):
+        control = "resume"
+
+    if control == "cancel":
+        cancelled = stack.cancel()
+        reply = (
+            f"好，「{KIND_CN.get(cancelled.kind, cancelled.kind)}」先不办了。" if cancelled else "好，那就不办了。"
+        )
+        return _finish(
+            store, key, intent, verdict,
+            {"reply": reply, "state": "idle", "need": None, "matched": False},
+            stack,
+        )
+
+    if control == "resume":
+        task = stack.top()
+        if task is None:
+            return _finish(
+                store, key, intent, verdict,
+                {"reply": "现在没有正在办的事。", "state": "idle", "need": None, "matched": False},
+                stack,
+            )
+        if task.kind in ("order", "refund"):
+            return _finish(
+                store, key, intent, verdict,
+                {"reply": order_skill.ask_with_recent(user_id), "state": "filling", "need": "orderNo", "matched": False},
+                stack,
+            )
+        return _finish(
+            store, key, intent, verdict,
+            {"reply": f"我们接着说「{KIND_CN.get(task.kind, task.kind)}」。", "state": "answering", "need": None, "matched": False},
+            stack,
+        )
+
+    if intent in ("order", "refund", "policy", "course", "progress"):
+        stack.push(intent)
 
     result: dict[str, Any]
     if manual:
@@ -182,13 +241,6 @@ def handle_turn(store: Store, user_id: int, message: str, session_key: str | Non
                 store, session, user_id, message, "ticket", session.slots.get("orderNo", ""), FALLBACK_ANSWER
             )
 
-    store.trace(key, "answer", result["reply"])
-    store.save_state(key, result["state"])
-    store.append_turn(key, "assistant", result["reply"])
-    return {
-        "sessionKey": key,
-        "intent": intent,
-        "intentConfidence": verdict.confidence,
-        "intentSource": verdict.source,
-        **result,
-    }
+    if result["state"] == "answering" and stack.top() is not None and stack.top().kind == intent:
+        stack.pop()
+    return _finish(store, key, intent, verdict, result, stack)
