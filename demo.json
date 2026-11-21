@@ -1,0 +1,28 @@
+{
+  "version": 1,
+  "note": "演示固定数据（T4.2）：只靠业务键定位（手机号 / series_code / cohort_code），不认自增 id——库重建、重灌种子之后照样能找到同一套餐。resolved 是最近一次 seed_demo.py --write 写下的解析结果，仅供人看，脚本运行时一律重新解析。",
+  "user": {
+    "mobile": "13900000161"
+  },
+  "series": {
+    "code": "general_purpose_programming_foundation_online_live"
+  },
+  "cohort": {
+    "code": "COH00000101"
+  },
+  "expect": {
+    "paidAmount": 4999.0,
+    "kbQuestion": "退款多久到账",
+    "kbArticleNo": "KB-003",
+    "handoffMessage": "顺延",
+    "slaHours": 4,
+    "refundType": "personal_reason"
+  },
+  "resolved": {
+    "userId": 161,
+    "studentId": 1,
+    "seriesId": 1,
+    "cohortId": 1,
+    "institutionId": 1
+  }
+}

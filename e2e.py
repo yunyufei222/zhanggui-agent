@@ -31,6 +31,7 @@ if ROOT not in sys.path:
 import uvicorn  # noqa: E402
 
 from app.database import fetch_one  # noqa: E402
+from seed_demo import load_manifest, resolve as resolve_demo  # noqa: E402
 
 MAIN_PORT = int(os.getenv("E2E_MAIN_PORT", "8111"))
 AGENT_PORT = int(os.getenv("E2E_AGENT_PORT", "8112"))
@@ -113,23 +114,18 @@ def main() -> int:
     wait_ready(f"http://127.0.0.1:{AGENT_PORT}")
     print("\n服务就绪：main %d / agent %d\n" % (MAIN_PORT, AGENT_PORT))
 
-    samples_user = fetch_one(
-        "SELECT sp.user_id, sp.id AS student_id FROM student_profile AS sp WHERE sp.yn = 1 ORDER BY sp.id LIMIT 1"
-    )
-    samples_cohort = fetch_one(
-        """
-        SELECT c.id AS cohort_id
-        FROM series AS s JOIN series_cohort AS c ON c.series_id = s.id
-        WHERE s.sale_status = 'on_sale' AND c.yn = 1
-        ORDER BY s.id, c.id LIMIT 1
-        """
-    )
-    assert samples_user and samples_cohort, "演示数据不够：缺学员或班期"
-
-    user_id = int(samples_user["user_id"])
-    student_id = int(samples_user["student_id"])
-    cohort_id = int(samples_cohort["cohort_id"])
+    # T4.2：演示对象来自 demo.json（业务键），不是「库里第一条」
+    manifest = load_manifest()
+    demo = resolve_demo(manifest)
+    expect = manifest["expect"]
+    user_id = int(demo["userId"])
+    student_id = int(demo["studentId"])
+    cohort_id = int(demo["cohortId"])
     headers = user_headers(user_id)
+    print(
+        f"演示对象：user={user_id} student={student_id} cohort={demo['cohortCode']} "
+        f"售价={demo['salePrice']}\n"
+    )
 
     # 1 健康
     _, agent_health = http(f"{AGENT}/health")
@@ -222,16 +218,16 @@ def main() -> int:
     )
 
     # 6 政策问答
-    policy = chat(session_key, user_id, "退款多久到账")
+    policy = chat(session_key, user_id, expect["kbQuestion"])
     check(
         6,
-        "政策问答命中知识库原文",
-        policy.get("matched") is True and policy.get("articleNo") in {"KB-003", "KB-004"},
+        "政策问答命中知识库原文（KB 编号来自 demo.json）",
+        policy.get("matched") is True and policy.get("articleNo") == expect["kbArticleNo"],
         f"matched={policy.get('matched')} article={policy.get('articleNo')}",
     )
 
     # 7 弱命中转人工 → 建工单
-    weak = chat(session_key, user_id, "顺延")
+    weak = chat(session_key, user_id, expect["handoffMessage"])
     ticket = fetch_one(
         "SELECT id, ticket_no, ticket_status FROM service_ticket WHERE user_id = %s ORDER BY id DESC LIMIT 1",
         (user_id,),
@@ -242,7 +238,7 @@ def main() -> int:
         weak["state"] == "handoff"
         and ticket is not None
         and ticket["ticket_no"] in weak["reply"]
-        and "4 小时" in weak["reply"],
+        and f"{expect['slaHours']} 小时" in weak["reply"],
         f"ticket={ticket['ticket_no'] if ticket else None}",
     )
 
