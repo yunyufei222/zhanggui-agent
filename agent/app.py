@@ -16,6 +16,7 @@ from fastapi.responses import HTMLResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 from .config import VERSION
+from .sim import router as sim_router
 from .pipeline import LLM, handle_turn
 from .state import STATES, TRANSITIONS
 from .store import Store
@@ -23,6 +24,7 @@ from app.database import fetch_one
 from app.response import ok
 
 app = FastAPI(title="Edu Agent", version=VERSION)
+app.include_router(sim_router)
 WEB_DIR = Path(__file__).with_name("web")
 
 
