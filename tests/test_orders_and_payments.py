@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 
 def create_order(client, user_headers, user_id: int, student_id: int, cohort_id: int) -> int:
     response = client.post(
@@ -256,6 +258,68 @@ def test_post_mock_payment_notification(client, samples, user_headers, db):
     assert response.status_code == 200
     assert response.json()["data"]["paymentStatusCode"] == "paid"
     assert response.json()["data"]["orderStatusCode"] == "paid"
+
+
+def test_paid_creates_enrollment(client, samples, user_headers, db):
+    """T0.3：支付成功要建报名关系——否则付过钱的人在「学习进度」里查不到自己的班。
+
+    必须挑一个这个学生还没报名过的班：student_cohort_rel 上有
+    uk(student_id, cohort_id)，同班重复报名不会产生第二行（这是业务规则），
+    用老班做样本会把「没建」和「已存在」混为一谈。
+    """
+    user = samples.user_with_student
+    cohort = db["fetch_one"](
+        """
+        SELECT c.id AS cohort_id
+        FROM series AS s
+        JOIN series_cohort AS c ON c.series_id = s.id
+        WHERE s.sale_status = 'on_sale' AND c.yn = 1
+          AND c.id NOT IN (SELECT cohort_id FROM student_cohort_rel WHERE student_id = %s)
+        ORDER BY c.id DESC
+        LIMIT 1
+        """,
+        (user["student_id"],),
+    )
+    if cohort is None:
+        pytest.skip("库里的在售班次都被这个学生报满了，建不出「干净样本」")
+
+    cohort_id = int(cohort["cohort_id"])
+    order_id = create_order(
+        client, user_headers, user["user_id"], user["student_id"], cohort_id
+    )
+    payment_id = create_payment(client, user_headers, user["user_id"], order_id)
+    payment = db["fetch_one"](
+        "SELECT payment_no, order_id, payment_channel, amount FROM payment_record WHERE id = %s",
+        (payment_id,),
+    )
+    notify_payment_paid(client, payment)
+
+    rel = db["fetch_one"](
+        """
+        SELECT rel.enroll_status, rel.student_id, rel.cohort_id, rel.order_item_id
+        FROM student_cohort_rel AS rel
+        JOIN order_item AS item ON item.id = rel.order_item_id
+        WHERE item.order_id = %s
+        """,
+        (order_id,),
+    )
+    assert rel is not None, "支付成功后没有建报名关系"
+    assert rel["enroll_status"] == "active"
+    assert int(rel["student_id"]) == int(user["student_id"])
+    assert int(rel["cohort_id"]) == cohort_id
+
+    # 幂等：同一条支付通知再来一次，不许建第二条
+    notify_payment_paid(client, payment)
+    again = db["fetch_one"](
+        """
+        SELECT COUNT(*) AS n
+        FROM student_cohort_rel AS rel
+        JOIN order_item AS item ON item.id = rel.order_item_id
+        WHERE item.order_id = %s
+        """,
+        (order_id,),
+    )
+    assert int(again["n"]) == 1, "重复通知建出了第二条报名关系"
 
 
 def test_close_payment(client, samples, user_headers):

@@ -340,6 +340,22 @@ def mock_payment_notification(
                 """,
                 (now, order["id"]),
             )
+            # T0.3：付款成功即建立履约关系（报名）。幂等靠 uk_order_item / uk_student_cohort。
+            cursor.execute(
+                """
+                INSERT INTO student_cohort_rel
+                    (institution_id, user_id, student_id, cohort_id, order_item_id,
+                     enroll_status, enroll_at, created_at, updated_at)
+                SELECT institution_id, user_id, student_id, cohort_id, id,
+                       'active', %s, %s, %s
+                FROM order_item
+                WHERE order_id = %s
+                ON DUPLICATE KEY UPDATE
+                    enroll_status = VALUES(enroll_status),
+                    updated_at = VALUES(updated_at)
+                """,
+                (now, now, now, order["id"]),
+            )
             if order["coupon_receive_record_id"]:
                 cursor.execute(
                     """
