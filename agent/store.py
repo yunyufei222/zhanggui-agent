@@ -130,6 +130,29 @@ class Store:
             raise ValueError(f"没有这个状态：{state}（允许：{', '.join(STATES)}）")
         self.trace(session_key, "state", state)
 
+    def trace_transition(self, session_key: str, previous: str | None, state: str, event: str = "") -> None:
+        """状态真变了才写一行：`idle→filling（clarify）`。
+
+        不复用 step='state'：`load()` 靠最后一条 state 还原会话，值是裸状态；
+        混进箭头会让恢复逻辑读到 'idle→filling' 这种非法状态。
+        """
+        if not previous or previous == state:
+            return
+        label = f"{previous}→{state}"
+        if event:
+            label += f"（{event}）"
+        self.trace(session_key, "transition", label)
+
+    def traces(self, session_key: str, limit: int = 100) -> list[dict[str, Any]]:
+        rows = fetch_all(
+            "SELECT step, value, created_at FROM (SELECT * FROM dialogue_trace "
+            "WHERE session_key = %s ORDER BY id DESC LIMIT %s) AS recent ORDER BY id",
+            (session_key, max(1, min(limit, 500))),
+        )
+        return [
+            {"step": row["step"], "value": row["value"], "at": str(row["created_at"])} for row in rows
+        ]
+
     # ------------------------------------------------------------------- load
     def load(self, session_key: str) -> Session:
         """从四张表还原一个会话：状态取最后一条 state trace，槽位取每个 key 的最新值。"""

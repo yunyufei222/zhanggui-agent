@@ -131,6 +131,16 @@ def session_state(session_key: str) -> dict[str, Any]:
     return ok(snapshot)
 
 
+@app.get("/sessions/{session_key}/trace")
+def session_trace(session_key: str, limit: int = 100) -> dict[str, Any]:
+    """这一场会话的完整留痕：input / intent / query / answer / state / transition。"""
+    store = Store()
+    if store.session_row(session_key) is None:
+        raise HTTPException(status_code=404, detail="会话不存在：" + session_key)
+    rows = store.traces(session_key, limit=max(1, min(limit, 500)))
+    return ok({"sessionKey": session_key, "count": len(rows), "rows": rows})
+
+
 @app.post("/sessions/{session_key}/resume")
 def session_resume(session_key: str, limit: int = 20) -> dict[str, Any]:
     """把关闭的会话重新打开，并把最近几轮一起带回来。"""

@@ -99,7 +99,15 @@ def best_kb(message: str) -> dict[str, Any] | None:
     return winner["row"]
 
 
-def _finish(store: Store, key: str, intent: str, verdict, result: dict[str, Any], stack: TaskStack) -> dict[str, Any]:
+def _finish(
+    store: Store,
+    key: str,
+    intent: str,
+    verdict,
+    result: dict[str, Any],
+    stack: TaskStack,
+    prev_state: str | None = None,
+) -> dict[str, Any]:
     """一轮的收尾：栈落盘 → answer → state → 助手那轮。"""
     if result.get("need") and not result.get("action"):
         result["action"] = "clarify"
@@ -109,6 +117,7 @@ def _finish(store: Store, key: str, intent: str, verdict, result: dict[str, Any]
     store.put_slot(key, "taskStack", stack.to_json(), "ask")
     store.trace(key, "answer", result["reply"])
     store.save_state(key, result["state"])
+    store.trace_transition(key, prev_state, result["state"], result.get("action") or intent)
     store.append_turn(key, "assistant", result["reply"])
     return {
         "sessionKey": key,
@@ -161,6 +170,7 @@ def handle_turn(store: Store, user_id: int, message: str, session_key: str | Non
         store.start_session(key, user_id, None)
         session = store.load(key)
 
+    prev_state = session.state
     store.trace(key, "input", message)
     store.append_turn(key, "user", message)
 
@@ -189,7 +199,7 @@ def handle_turn(store: Store, user_id: int, message: str, session_key: str | Non
         return _finish(
             store, key, intent, verdict,
             {"reply": reply, "state": "idle", "need": None, "matched": False},
-            stack,
+            stack,            prev_state,
         )
 
     if control == "resume":
@@ -198,18 +208,18 @@ def handle_turn(store: Store, user_id: int, message: str, session_key: str | Non
             return _finish(
                 store, key, intent, verdict,
                 {"reply": "现在没有正在办的事。", "state": "idle", "need": None, "matched": False},
-                stack,
+                stack,                prev_state,
             )
         if task.kind in ("order", "refund"):
             return _finish(
                 store, key, intent, verdict,
                 {"reply": order_skill.ask_with_recent(user_id), "state": "filling", "need": "orderNo", "matched": False},
-                stack,
+                stack,                prev_state,
             )
         return _finish(
             store, key, intent, verdict,
             {"reply": f"我们接着说「{KIND_CN.get(task.kind, task.kind)}」。", "state": "answering", "need": None, "matched": False},
-            stack,
+            stack,            prev_state,
         )
 
     ask = clarify.decide(
@@ -231,7 +241,7 @@ def handle_turn(store: Store, user_id: int, message: str, session_key: str | Non
                 "action": "clarify",
                 "clarifyKind": ask.kind,
             },
-            stack,
+            stack,            prev_state,
         )
 
     if intent in ("order", "refund", "policy", "course", "progress"):
@@ -331,4 +341,4 @@ def handle_turn(store: Store, user_id: int, message: str, session_key: str | Non
 
     if result["state"] == "answering" and stack.top() is not None and stack.top().kind == intent:
         stack.pop()
-    return _finish(store, key, intent, verdict, result, stack)
+    return _finish(store, key, intent, verdict, result, stack, prev_state)
