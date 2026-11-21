@@ -150,7 +150,7 @@ def main() -> int:
             "cohortId": cohort_id,
             "couponReceiveRecordId": None,
             "orderSourceChannelId": None,
-            "remark": "e2e T4.1",
+            "remark": "demo 演示单",
         },
         headers,
     )

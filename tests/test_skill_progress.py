@@ -41,17 +41,21 @@ def enrolled(samples):
         )
         cursor.execute("DELETE FROM order_item WHERE item_name = '测试班·编程 第5期'")
         cursor.execute("DELETE FROM series_cohort WHERE cohort_name = '测试班·编程 第5期'")
-        cursor.execute(
-            """
-            INSERT INTO series_cohort (institution_id, series_id, head_teacher_id, cohort_code, cohort_name,
-                                       sale_price, max_student_count, current_student_count, yn,
-                                       start_date, end_date, created_at, updated_at)
-            VALUES (1, 1, %s, %s, '测试班·编程 第5期', 1999.00, 30, 12, 1, %s, %s, %s, %s)
-            """,
-            (int(teacher["head_teacher_id"]), f"PYT{int(now.timestamp())}", start,
-             start + timedelta(days=80), now, now),
-        )
-        cohort_id = int(cursor.lastrowid)
+        # 两期一模一样名字的班次（只差开课日期）——P⑯ 说的「同名班次」要能测
+        cohort_ids = []
+        for offset in (0, 7):
+            cursor.execute(
+                """
+                INSERT INTO series_cohort (institution_id, series_id, head_teacher_id, cohort_code, cohort_name,
+                                           sale_price, max_student_count, current_student_count, yn,
+                                           start_date, end_date, created_at, updated_at)
+                VALUES (1, 1, %s, %s, '测试班·编程 第5期', 1999.00, 30, 12, 1, %s, %s, %s, %s)
+                """,
+                (int(teacher["head_teacher_id"]), f"PYT{int(now.timestamp())}{offset}", start + timedelta(days=offset),
+                 start + timedelta(days=80 + offset), now, now),
+            )
+            cohort_ids.append(int(cursor.lastrowid))
+        cohort_id = cohort_ids[0]
         # rel.order_item_id 是 NOT NULL：挂到该学员最近一张订单上的一条明细
         template = fetch_one(
             "SELECT order_id, unit_price, discount_amount, payable_amount, service_period_days "
@@ -79,6 +83,27 @@ def enrolled(samples):
             """,
             (user["user_id"], user["student_id"], cohort_id, item_id, now, now, now),
         )
+        # 第二期：同名，另一条明细与报名关系
+        cursor.execute(
+            """
+            INSERT INTO order_item (institution_id, order_id, user_id, student_id, cohort_id, item_name,
+                                    unit_price, discount_amount, payable_amount, service_period_days,
+                                    order_item_status, created_at, updated_at)
+            VALUES (1, %s, %s, %s, %s, '测试班·编程 第5期', %s, %s, %s, %s, 'paid', %s, %s)
+            """,
+            (template["order_id"], user["user_id"], user["student_id"], cohort_ids[1],
+             template["unit_price"], template["discount_amount"], template["payable_amount"],
+             template["service_period_days"], now, now),
+        )
+        item2 = int(cursor.lastrowid)
+        cursor.execute(
+            """
+            INSERT INTO student_cohort_rel (institution_id, user_id, student_id, cohort_id, order_item_id,
+                                            enroll_status, enroll_at, created_at, updated_at)
+            VALUES (1, %s, %s, %s, %s, 'active', %s, %s, %s)
+            """,
+            (user["user_id"], user["student_id"], cohort_ids[1], item2, now, now, now),
+        )
     return {"cohortId": cohort_id, "cohortName": "测试班·编程 第5期"}
 
 
@@ -101,24 +126,14 @@ def test_arabic_numeral_matches_too(client, samples, enrolled):
     assert "剩余" in data["reply"] or "剩" in data["reply"]
 
 
-def test_same_name_cohorts_ask_which_one(client, samples):
-    """库里确实有两期同名的 202611 期，只能按开课日期让用户选。"""
+def test_same_name_cohorts_ask_which_one(client, samples, enrolled):
+    """两期同名班次（只差开课日期）→ 必须列出来让用户选，不能挑一个就答。"""
     user = samples.user_with_student
-    twins = fetch_one(
-        """
-        SELECT COUNT(*) AS n FROM student_cohort_rel r
-        JOIN series_cohort c ON c.id = r.cohort_id
-        WHERE r.student_id = %s AND c.cohort_name = '数据库开发实战班·直播 202611期'
-        """,
-        (user["student_id"],),
-    )
-    if int(twins["n"]) < 2:
-        pytest.skip("演示学员名下没有同名班次，跳过")
+    data = chat(client, user["user_id"], "测试班 第5期 学到哪")
 
-    data = chat(client, user["user_id"], "数据库开发实战班 202611期 学到哪")
     assert data["need"] == "cohort", data
     reply = data["reply"]
-    assert reply.count("数据库开发实战班·直播 202611期") >= 2, reply
+    assert reply.count(enrolled["cohortName"]) >= 2, reply
     assert "哪一期" in reply or "哪一个" in reply, reply
 
 
