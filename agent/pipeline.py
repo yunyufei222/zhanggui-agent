@@ -16,7 +16,7 @@ import os
 import re
 from typing import Any, Iterator
 
-from app.routers.chat import answer_course, answer_progress, extract_order_no, open_handoff
+from app.routers.chat import answer_course, extract_order_no, open_handoff
 from app.routers.kb import FALLBACK_ANSWER, STRONG_SCORE, search_rows
 
 from . import clarify
@@ -24,6 +24,7 @@ from .intent import HttpLLM, classify
 from .intent import scores as intent_scores
 from .skills import order as order_skill
 from .skills import course as course_skill
+from .skills import progress as progress_skill
 from .skills import refund as refund_skill
 from .skills import ticket as ticket_skill
 from .state import Session
@@ -332,8 +333,13 @@ def handle_turn(
         result = {"reply": answer["text"], "state": "answering", "need": None, "matched": False}
 
     elif intent == "progress":
-        answer = answer_progress(message, user_id)
-        result = {"reply": answer["text"], "state": "answering", "need": None, "matched": False}
+        answer = progress_skill.consult(user_id, message)
+        result = {
+            "reply": answer["reply"],
+            "state": "filling" if answer.get("need") else "answering",
+            "need": answer.get("need"),
+            "matched": False,
+        }
 
     else:
         hit = best_kb(message)
