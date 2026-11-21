@@ -70,6 +70,18 @@ def _rule_score(text: str) -> tuple[str, float, list[str]]:
     return top_intent, round(confidence, 3), hits
 
 
+def scores(text: str) -> list[tuple[str, float, list[str]]]:
+    """完整打分表（高到低），澄清要判断「一句话里几件事」就得看全表。"""
+    low = text.lower()
+    ranked: list[tuple[float, str, list[str]]] = []
+    for intent, words in RULES.items():
+        hits = [word for word, _ in words if word in low]
+        if hits:
+            ranked.append((sum(weight for word, weight in words if word in low), intent, hits))
+    ranked.sort(reverse=True)
+    return [(intent, score, hits) for score, intent, hits in ranked]
+
+
 def classify(text: str, llm: ClassifyFn | None = None, threshold: float = 0.5) -> Intent:
     """规则优先；只有规则拿不准、并且给了 llm 时，才问一次。"""
     intent, confidence, hits = _rule_score(text)

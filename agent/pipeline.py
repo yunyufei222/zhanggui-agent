@@ -19,7 +19,9 @@ from typing import Any, Iterator
 from app.routers.chat import answer_course, answer_progress, extract_order_no, open_handoff
 from app.routers.kb import FALLBACK_ANSWER, STRONG_SCORE, search_rows
 
+from . import clarify
 from .intent import HttpLLM, classify
+from .intent import scores as intent_scores
 from .skills import order as order_skill
 from .skills import refund as refund_skill
 from .skills import ticket as ticket_skill
@@ -88,6 +90,11 @@ def best_kb(message: str) -> dict[str, Any] | None:
 
 def _finish(store: Store, key: str, intent: str, verdict, result: dict[str, Any], stack: TaskStack) -> dict[str, Any]:
     """一轮的收尾：栈落盘 → answer → state → 助手那轮。"""
+    if result.get("need") and not result.get("action"):
+        result["action"] = "clarify"
+        result.setdefault("clarifyKind", "missing_param")
+    result.setdefault("action", "answer")
+
     store.put_slot(key, "taskStack", stack.to_json(), "ask")
     store.trace(key, "answer", result["reply"])
     store.save_state(key, result["state"])
@@ -127,6 +134,7 @@ def _handoff(store: Store, session: Session, user_id: int, message: str, reason:
     return {
         "reply": reply + suffix,
         "state": "handoff",
+        "action": "handoff",
         "handoffId": handoff_id,
         "ticketNo": ticket["ticketNo"] if ticket else None,
         "need": None,
@@ -190,6 +198,28 @@ def handle_turn(store: Store, user_id: int, message: str, session_key: str | Non
         return _finish(
             store, key, intent, verdict,
             {"reply": f"我们接着说「{KIND_CN.get(task.kind, task.kind)}」。", "state": "answering", "need": None, "matched": False},
+            stack,
+        )
+
+    ask = clarify.decide(
+        message,
+        intent,
+        verdict.confidence,
+        intent_scores(message),
+        has_order_no=bool(order_no),
+    )
+    if ask is not None:
+        store.trace(key, "clarify", ask.kind)
+        return _finish(
+            store, key, intent, verdict,
+            {
+                "reply": ask.question,
+                "state": "filling",
+                "need": ask.need,
+                "matched": False,
+                "action": "clarify",
+                "clarifyKind": ask.kind,
+            },
             stack,
         )
 
