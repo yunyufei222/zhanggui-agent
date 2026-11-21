@@ -6,11 +6,19 @@
 
 from __future__ import annotations
 
-from fastapi import FastAPI
+import json
+from typing import Annotated, Any, Iterator
+
+from fastapi import FastAPI, Header, HTTPException
+from fastapi.responses import StreamingResponse
+from pydantic import BaseModel, Field
 
 from .config import VERSION
+from .pipeline import handle_turn
 from .state import STATES, TRANSITIONS
+from .store import Store
 from app.database import fetch_one
+from app.response import ok
 
 app = FastAPI(title="Edu Agent", version=VERSION)
 
@@ -38,3 +46,53 @@ def health() -> dict[str, object]:
         "states": list(STATES),
         "transitions": {k: list(v) for k, v in TRANSITIONS.items()},
     }
+
+
+class ChatBody(BaseModel):
+    message: str = Field(min_length=1, max_length=500)
+    sessionKey: str | None = Field(default=None, max_length=64)
+    userId: int | None = None
+
+
+def _user_id(body: ChatBody, header: str | None) -> int:
+    if body.userId is not None:
+        return int(body.userId)
+    if header and header.isdigit():
+        return int(header)
+    raise HTTPException(status_code=401, detail="缺少 userId（body 或 X-User-Id 头）")
+
+
+@app.post("/chat")
+def chat(
+    body: ChatBody,
+    x_user_id: Annotated[str | None, Header(alias="X-User-Id")] = None,
+) -> dict[str, Any]:
+    """一轮对话：判读 → 补槽/检索 → 作答或转人工；四表全落。"""
+    store = Store()
+    result = handle_turn(store, _user_id(body, x_user_id), body.message, body.sessionKey)
+    return ok(result)
+
+
+def _chunks(text: str, size: int = 12) -> Iterator[str]:
+    for start in range(0, len(text), size):
+        yield text[start : start + size]
+
+
+@app.post("/chat/stream")
+def chat_stream(
+    body: ChatBody,
+    x_user_id: Annotated[str | None, Header(alias="X-User-Id")] = None,
+) -> StreamingResponse:
+    """同样的流程，按 SSE 吐：meta → 若干 token → done。"""
+    store = Store()
+    result = handle_turn(store, _user_id(body, x_user_id), body.message, body.sessionKey)
+
+    def events() -> Iterator[str]:
+        meta = {"sessionKey": result["sessionKey"], "intent": result["intent"]}
+        yield "event: meta\ndata: " + json.dumps(meta, ensure_ascii=False) + "\n\n"
+        for piece in _chunks(result["reply"]):
+            yield "data: " + json.dumps({"text": piece}, ensure_ascii=False) + "\n\n"
+        done = {"state": result["state"], "matched": result.get("matched", False), "need": result.get("need")}
+        yield "event: done\ndata: " + json.dumps(done, ensure_ascii=False) + "\n\n"
+
+    return StreamingResponse(events(), media_type="text/event-stream", headers={"cache-control": "no-store"})

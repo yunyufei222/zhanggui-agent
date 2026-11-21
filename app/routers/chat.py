@@ -9,7 +9,7 @@ from __future__ import annotations
 import re
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field
 
 from datetime import datetime
@@ -191,12 +191,25 @@ def persist(user_id: int, message: str, intent: str, reply: str, trace: list[dic
 
 
 @router.get("/chat/handoffs")
-def list_handoffs(status: str = "pending"):
-    rows = fetch_all(
-        "SELECT id, session_key, user_id, reason, order_no, detail, status, created_at "
-        "FROM dialogue_handoff WHERE status = %s ORDER BY id LIMIT 50",
-        (status,),
-    )
+def list_handoffs(
+    status: str = "pending",
+    session_key: Annotated[
+        str | None,
+        Query(alias="sessionKey", max_length=64, description="只看某个会话的工单；不传就看全局前 50 条。"),
+    ] = None,
+):
+    if session_key:
+        rows = fetch_all(
+            "SELECT id, session_key, user_id, reason, order_no, detail, status, created_at "
+            "FROM dialogue_handoff WHERE status = %s AND session_key = %s ORDER BY id LIMIT 50",
+            (status, session_key),
+        )
+    else:
+        rows = fetch_all(
+            "SELECT id, session_key, user_id, reason, order_no, detail, status, created_at "
+            "FROM dialogue_handoff WHERE status = %s ORDER BY id LIMIT 50",
+            (status,),
+        )
     return ok({"status": status, "count": len(rows), "items": [dict(r) for r in rows]})
 
 

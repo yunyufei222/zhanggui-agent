@@ -45,7 +45,11 @@ def test_handoff_queue_and_answer_roundtrip(client, user_headers, samples):
     key, hid = open_ticket(client, user_headers, samples, order_no(uid(samples)))
     assert hid, "转人工没有生成工单 id"
 
-    q = client.get("/api/v1/chat/handoffs", params={"status": "pending"}, headers=auth(user_headers, samples))
+    q = client.get(
+        "/api/v1/chat/handoffs",
+        params={"status": "pending", "sessionKey": key},
+        headers=auth(user_headers, samples),
+    )
     assert q.status_code == 200, q.text
     ids = [i["id"] for i in payload(q)["items"]]
     assert hid in ids, "工单没进待处理队列"
