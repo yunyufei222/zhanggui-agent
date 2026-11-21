@@ -15,8 +15,8 @@ dependencies = [
   "sqlalchemy>=2.0.49",
   "uvicorn>=0.34.0",
 ]
-description = "Add your description here"
-name = "edu-data"
+description = "掌柜智库客服 Agent：规则意图 + 四类技能 + 退款工单闭环 + 可回放轨迹"
+name = "zhanggui-agent"
 readme = "README.md"
 requires-python = ">=3.12"
 version = "0.1.0"
