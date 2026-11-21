@@ -12,6 +12,8 @@ from ..database import db_cursor, fetch_all, fetch_one
 from ..dependencies import get_current_user_id
 from ..errors import bad_request, conflict, not_found
 from ..response import ok
+from ..services.ticket import add_follow, transition as ticket_transition
+
 from ..utils import count_total, format_datetime, local_now, make_no, offset_limit
 
 router = APIRouter(prefix="/api/v1", tags=["tickets"])
@@ -227,6 +229,54 @@ def create_service_ticket(
             "ticketNo": row["ticket_no"] if row else None,
             "ticketStatus": "pending",
         }
+    )
+
+
+class TicketActionRequest(BaseModel):
+    remark: str | None = Field(default=None, description="操作备注，会写进跟进记录。")
+
+
+class TicketFollowRequest(BaseModel):
+    followType: str = Field(description="跟进类型。可选值：reply_user、status_update、refund_review、escalation、internal_note。")
+    followContent: str = Field(description="跟进内容。")
+    followResult: str | None = Field(default=None, description="跟进结果，可选。")
+
+
+@router.post("/service-tickets/{ticket_id}/accept")
+def accept_service_ticket(
+    body: Annotated[TicketActionRequest, Body(description="受理请求体。")],
+    ticket_id: Annotated[int, Path(description="工单 ID。")],
+    current_user_id: Annotated[int, Depends(get_current_user_id)],
+):
+    return ok(ticket_transition(ticket_id, current_user_id, "in_progress", body.remark or ""))
+
+
+@router.post("/service-tickets/{ticket_id}/close")
+def close_service_ticket(
+    body: Annotated[TicketActionRequest, Body(description="完结请求体。")],
+    ticket_id: Annotated[int, Path(description="工单 ID。")],
+    current_user_id: Annotated[int, Depends(get_current_user_id)],
+):
+    return ok(ticket_transition(ticket_id, current_user_id, "closed", body.remark or ""))
+
+
+@router.post("/service-tickets/{ticket_id}/reopen")
+def reopen_service_ticket(
+    body: Annotated[TicketActionRequest, Body(description="重开请求体。")],
+    ticket_id: Annotated[int, Path(description="工单 ID。")],
+    current_user_id: Annotated[int, Depends(get_current_user_id)],
+):
+    return ok(ticket_transition(ticket_id, current_user_id, "in_progress", body.remark or "工单重开"))
+
+
+@router.post("/service-tickets/{ticket_id}/follow-records")
+def create_follow_record(
+    body: Annotated[TicketFollowRequest, Body(description="跟进记录请求体。")],
+    ticket_id: Annotated[int, Path(description="工单 ID。")],
+    current_user_id: Annotated[int, Depends(get_current_user_id)],
+):
+    return ok(
+        add_follow(ticket_id, current_user_id, body.followType, body.followContent, body.followResult)
     )
 
 
