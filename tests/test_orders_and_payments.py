@@ -102,6 +102,36 @@ def test_get_orders(client, samples, user_headers):
     assert "total" in response.json()["data"]
 
 
+def test_get_orders_filter_by_order_no(client, samples, user_headers):
+    """T0.1：列表要能按 orderNo 检索——命中一条，未知单号为空。"""
+    user = samples.user_with_student
+    row = samples.on_sale_series_with_cohort
+    order_id = create_order(
+        client, user_headers, user["user_id"], user["student_id"], row["cohort_id"]
+    )
+    order_no = client.get(
+        f"/api/v1/orders/{order_id}", headers=user_headers(user["user_id"])
+    ).json()["data"]["orderNo"]
+
+    hit = client.get(
+        "/api/v1/orders",
+        params={"orderNo": order_no},
+        headers=user_headers(user["user_id"]),
+    )
+    assert hit.status_code == 200
+    data = hit.json()["data"]
+    assert data["total"] >= 1
+    assert {item["orderNo"] for item in data["list"]} == {order_no}
+
+    miss = client.get(
+        "/api/v1/orders",
+        params={"orderNo": "ORD-NOT-EXIST"},
+        headers=user_headers(user["user_id"]),
+    )
+    assert miss.status_code == 200
+    assert miss.json()["data"]["total"] == 0
+
+
 def test_get_order_detail(client, samples, user_headers):
     user = samples.user_with_student
     row = samples.on_sale_series_with_cohort

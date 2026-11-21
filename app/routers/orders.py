@@ -337,6 +337,10 @@ def list_orders(
         str | None,
         Query(description="订单状态。可选值：pending、paid、completed、cancelled、partial_refunded、refunded。"),
     ] = None,
+    order_no: Annotated[
+        str | None,
+        Query(alias="orderNo", description="按订单号精确检索（业务单号唯一）。"),
+    ] = None,
     page_no: Annotated[int, Query(alias="pageNo", description="页码，从 1 开始。")] = 1,
     page_size: Annotated[int, Query(alias="pageSize", description="每页条数，范围 1 到 100。")] = 20,
 ):
@@ -346,6 +350,9 @@ def list_orders(
     if status:
         conditions.append("order_status = %s")
         params.append(status)
+    if order_no:
+        conditions.append("order_no = %s")
+        params.append(order_no)
     total = count_total(
         f"""
         SELECT COUNT(*) AS total
