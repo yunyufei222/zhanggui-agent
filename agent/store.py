@@ -21,6 +21,7 @@ from typing import Any
 from app.database import db_cursor, fetch_all, fetch_one
 
 from .state import STATES, Session
+from .tasks import TaskStack
 
 
 def new_session_key() -> str:
@@ -48,6 +49,27 @@ class Store:
                 (session_key, user_id, intention, now, now),
             )
         return session_key
+
+    def session_row(self, session_key: str) -> dict[str, Any] | None:
+        return fetch_one(
+            "SELECT user_id, intention, status, created_at, updated_at FROM dialogue_session WHERE session_key = %s",
+            (session_key,),
+        )
+
+    def messages(self, session_key: str, limit: int = 50) -> list[dict[str, Any]]:
+        """按轮次正序；limit 取最近的 N 轮（前端翻页用）。"""
+        rows = fetch_all(
+            "SELECT turn_no, role, content, created_at FROM dialogue_turn WHERE session_key = %s ORDER BY turn_no",
+            (session_key,),
+        )
+        return rows[-limit:] if limit > 0 else rows
+
+    def reopen(self, session_key: str) -> None:
+        with db_cursor() as (_, cursor):
+            cursor.execute(
+                "UPDATE dialogue_session SET status = 'open', updated_at = %s WHERE session_key = %s",
+                (_now(), session_key),
+            )
 
     def close(self, session_key: str) -> None:
         with db_cursor() as (_, cursor):
@@ -122,3 +144,28 @@ class Store:
         if state not in STATES:
             state = "idle"
         return Session(session_id=session_key, user_id=int(row["user_id"]), state=state, slots=self.slots(session_key))
+
+    def snapshot(self, session_key: str) -> dict[str, Any] | None:
+        """一份可以直接交给前端的会话全貌：状态 / 槽位 / 任务栈 / 最近意图。"""
+        row = self.session_row(session_key)
+        if row is None:
+            return None
+        loaded = self.load(session_key)
+        last_intent = fetch_one(
+            "SELECT value FROM dialogue_trace WHERE session_key = %s AND step = 'intent' ORDER BY id DESC LIMIT 1",
+            (session_key,),
+        )
+        slots = dict(loaded.slots)
+        stack_raw = slots.pop("taskStack", "")
+        stack = TaskStack.from_json(stack_raw)
+        return {
+            "sessionKey": session_key,
+            "userId": int(row["user_id"]),
+            "intention": row["intention"],
+            "status": row["status"],
+            "state": loaded.state,
+            "slots": slots,
+            "taskStack": [{"kind": task.kind, "slots": task.slots} for task in stack.items],
+            "intent": str(last_intent["value"]) if last_intent else None,
+            "updatedAt": row["updated_at"],
+        }

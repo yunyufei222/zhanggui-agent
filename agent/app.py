@@ -96,3 +96,56 @@ def chat_stream(
         yield "event: done\ndata: " + json.dumps(done, ensure_ascii=False) + "\n\n"
 
     return StreamingResponse(events(), media_type="text/event-stream", headers={"cache-control": "no-store"})
+
+
+@app.get("/sessions/{session_key}/messages")
+def session_messages(session_key: str, limit: int = 50) -> dict[str, Any]:
+    """按轮次返回对话；limit 取最近 N 轮。"""
+    store = Store()
+    if store.session_row(session_key) is None:
+        raise HTTPException(status_code=404, detail="会话不存在：" + session_key)
+    rows = store.messages(session_key, limit=max(1, min(limit, 200)))
+    return ok(
+        {
+            "sessionKey": session_key,
+            "count": len(rows),
+            "messages": [
+                {
+                    "turnNo": int(row["turn_no"]),
+                    "role": row["role"],
+                    "content": row["content"],
+                    "at": row["created_at"],
+                }
+                for row in rows
+            ],
+        }
+    )
+
+
+@app.get("/sessions/{session_key}/state")
+def session_state(session_key: str) -> dict[str, Any]:
+    """状态 / 槽位 / 任务栈 / 最近意图，一次给全。"""
+    snapshot = Store().snapshot(session_key)
+    if snapshot is None:
+        raise HTTPException(status_code=404, detail="会话不存在：" + session_key)
+    return ok(snapshot)
+
+
+@app.post("/sessions/{session_key}/resume")
+def session_resume(session_key: str, limit: int = 20) -> dict[str, Any]:
+    """把关闭的会话重新打开，并把最近几轮一起带回来。"""
+    store = Store()
+    if store.session_row(session_key) is None:
+        raise HTTPException(status_code=404, detail="会话不存在：" + session_key)
+    store.reopen(session_key)
+    snapshot = store.snapshot(session_key) or {}
+    rows = store.messages(session_key, limit=max(1, min(limit, 200)))
+    return ok(
+        {
+            **snapshot,
+            "messages": [
+                {"turnNo": int(row["turn_no"]), "role": row["role"], "content": row["content"]}
+                for row in rows
+            ],
+        }
+    )
