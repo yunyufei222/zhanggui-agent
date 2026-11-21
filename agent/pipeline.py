@@ -68,24 +68,35 @@ def _terms(text: str) -> Iterator[str]:
 
 
 def best_kb(message: str) -> dict[str, Any] | None:
-    """在知识库里找最强的强命中：先整句，再按切片；同分取更长的词。"""
-    best: tuple[tuple[int, int], dict[str, Any]] | None = None
+    """按「命中了几种说法」投票，而不是被某一种说法的第一条带走。
+
+    旧实现每个切片只取排名第一的那条，再比单个分数——
+    「退款多久到账」里「退款」把 KB-001（七天无理由，priority 高）顶上来，
+    「到账」命中的 KB-003（退款到账时效）因为不是那一条的榜首就被丢掉了，
+    于是回答了错误的政策。现在按文章累计命中的切片种类，命中面更宽的胜。
+    """
+    votes: dict[str, dict[str, Any]] = {}
     seen: set[str] = set()
     for term in _terms(message):
         if len(term) < 2 or term in seen:
             continue
         seen.add(term)
-        rows = search_rows(term, None, 1)
-        if not rows:
-            continue
-        row = rows[0]
-        score = int(row["score"])
-        if score < STRONG_SCORE:
-            continue
-        key = (score, len(term))
-        if best is None or key > best[0]:
-            best = (key, row)
-    return best[1] if best else None
+        for row in search_rows(term, None, 3):
+            score = int(row["score"])
+            if score < STRONG_SCORE:
+                continue
+            slot = votes.setdefault(
+                str(row["article_no"]), {"row": row, "terms": set(), "score": 0}
+            )
+            slot["terms"].add(term)
+            slot["score"] += score
+            if score > int(slot["row"]["score"]):
+                slot["row"] = row
+
+    if not votes:
+        return None
+    winner = max(votes.values(), key=lambda item: (len(item["terms"]), item["score"]))
+    return winner["row"]
 
 
 def _finish(store: Store, key: str, intent: str, verdict, result: dict[str, Any], stack: TaskStack) -> dict[str, Any]:
