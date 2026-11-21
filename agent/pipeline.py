@@ -23,6 +23,7 @@ from . import clarify
 from .intent import HttpLLM, classify
 from .intent import scores as intent_scores
 from .skills import order as order_skill
+from .skills import course as course_skill
 from .skills import refund as refund_skill
 from .skills import ticket as ticket_skill
 from .state import Session
@@ -316,7 +317,7 @@ def handle_turn(store: Store, user_id: int, message: str, session_key: str | Non
             result = _handoff(store, session, user_id, message, "ticket", session.slots.get("orderNo", ""), FALLBACK_ANSWER)
 
     elif intent == "course":
-        answer = answer_course(message)
+        answer = course_skill.consult(user_id, message)
         result = {"reply": answer["text"], "state": "answering", "need": None, "matched": False}
 
     elif intent == "progress":
