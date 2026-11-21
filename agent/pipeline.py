@@ -15,11 +15,12 @@ from __future__ import annotations
 import re
 from typing import Any, Iterator
 
-from app.routers.chat import answer_course, answer_order, answer_progress, detect, extract_order_no, open_handoff
+from app.routers.chat import answer_course, answer_progress, detect, extract_order_no, open_handoff
 from app.routers.kb import FALLBACK_ANSWER, STRONG_SCORE, search_rows
 
 from .state import Session
 from .store import Store, new_session_key
+from .skills import order as order_skill
 
 POLICY_HINTS = ("多久", "时效", "规则", "政策", "流程", "能不能", "怎么退", "如何", "几天", "什么时候")
 MANUAL_HINTS = ("人工", "真人", "客服")
@@ -93,8 +94,12 @@ def handle_turn(store: Store, user_id: int, message: str, session_key: str | Non
         result = _handoff(store, session, user_id, message, "ticket", session.slots.get("orderNo", ""), FALLBACK_ANSWER)
 
     elif intent in ("order", "refund") and session.slots.get("orderNo"):
-        answer = answer_order(message if order_no else session.slots["orderNo"], user_id)
-        result = {"reply": answer["text"], "state": "answering", "need": None, "matched": False}
+        result = {
+            "reply": order_skill.answer(user_id, session.slots["orderNo"]),
+            "state": "answering",
+            "need": None,
+            "matched": False,
+        }
 
     elif intent in ("order", "refund"):
         if any(hint in message for hint in POLICY_HINTS):
@@ -113,7 +118,7 @@ def handle_turn(store: Store, user_id: int, message: str, session_key: str | Non
         else:
             store.put_slot(key, "need", "orderNo", "ask")
             result = {
-                "reply": "请提供订单号（ORD 开头的那个），我好帮你查。",
+                "reply": order_skill.ask_with_recent(user_id),
                 "state": "filling",
                 "need": "orderNo",
                 "matched": False,
