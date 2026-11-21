@@ -35,8 +35,26 @@ import uvicorn  # noqa: E402
 from app.database import fetch_one  # noqa: E402
 from seed_demo import load_manifest, resolve as resolve_demo  # noqa: E402
 
-MAIN_PORT = int(os.getenv("E2E_MAIN_PORT", "8111"))
-AGENT_PORT = int(os.getenv("E2E_AGENT_PORT", "8112"))
+def _free_port(start: int) -> int:
+    """从 start 往后找一个没人占的端口。
+
+    不能让 e2e 撞上正在跑的演示服务：绑不上时它不会失败，只会悄悄去连那台
+    老进程，结果是「10/10 通过」但测的不是当前代码。宁可换端口，也不冒名顶替。
+    """
+    import socket
+
+    for port in range(start, start + 40):
+        with socket.socket() as probe:
+            try:
+                probe.bind(("127.0.0.1", port))
+                return port
+            except OSError:
+                continue
+    raise SystemExit(f"从 {start} 起找不到空闲端口")
+
+
+MAIN_PORT = int(os.getenv("E2E_MAIN_PORT") or _free_port(8111))
+AGENT_PORT = int(os.getenv("E2E_AGENT_PORT") or _free_port(MAIN_PORT + 1))
 MAIN = f"http://127.0.0.1:{MAIN_PORT}/api/v1"
 AGENT = f"http://127.0.0.1:{AGENT_PORT}"
 

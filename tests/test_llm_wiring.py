@@ -65,6 +65,8 @@ def test_disabled_by_default(monkeypatch):
 
 
 def test_env_wires_the_client(monkeypatch, stub):
+    # .env 里可能已设 AGENT_LLM_TIMEOUT（推理模型要 8 秒），这条只验默认档
+    monkeypatch.delenv("AGENT_LLM_TIMEOUT", raising=False)
     monkeypatch.setenv("AGENT_LLM_ENABLED", "1")
     monkeypatch.setenv("AGENT_LLM_API_KEY", "test-key")
     monkeypatch.setenv("AGENT_LLM_BASE_URL", stub)
@@ -75,6 +77,14 @@ def test_env_wires_the_client(monkeypatch, stub):
     assert client.base_url == stub.rstrip("/")
     assert client.model == "stub-model"
     assert client.timeout <= 3.0, "外部调用要压到 3 秒级"
+
+
+def test_timeout_override(monkeypatch, stub):
+    monkeypatch.setenv("AGENT_LLM_ENABLED", "1")
+    monkeypatch.setenv("AGENT_LLM_API_KEY", "test-key")
+    monkeypatch.setenv("AGENT_LLM_BASE_URL", stub)
+    monkeypatch.setenv("AGENT_LLM_TIMEOUT", "8")
+    assert _build_llm().timeout == 8.0
 
 
 def test_client_parses_openai_shape(monkeypatch, stub):

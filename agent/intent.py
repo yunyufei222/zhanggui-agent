@@ -36,9 +36,10 @@ RULES: dict[str, tuple[tuple[str, float], ...]] = {
 
 ClassifyFn = Callable[[str], "str | None"]
 PROMPT = (
-    "Classify the user's intent. Reply with EXACTLY ONE token from this list and nothing else:\n"
-    "order | refund | policy | course | progress | human | greeting | unknown\n"
-    "No punctuation, no explanation, no Chinese. Sentence: "
+    "把这句话归到下面一类，只输出英文标签本身，不要解释、不要标点：\n"
+    "order=查订单/付款/支付问题；refund=要退款；policy=问退款规则/时效/流程；"
+    "course=问课程/价格/班期；progress=问学习进度；human=要人工；greeting=打招呼；unknown=以上都不是。\n"
+    "句子："
 )
 
 # 推理模型常回中文（“支付/退款”），这里做一层同义词兜底，避免白名单把它全拒了

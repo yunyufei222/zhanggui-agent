@@ -40,10 +40,13 @@ def _build_llm() -> HttpLLM | None:
     key = os.getenv("AGENT_LLM_API_KEY") or os.getenv("DEEPSEEK_API_KEY")
     if not key:
         return None
+    timeout_env = os.getenv("AGENT_LLM_TIMEOUT", "").strip()
     return HttpLLM(
         base_url=os.getenv("AGENT_LLM_BASE_URL", "https://api.deepseek.com/v1"),
         api_key=key,
         model=os.getenv("AGENT_LLM_MODEL", "deepseek-flash"),
+        # 推理模型（deepseek-flash 之类）3 秒不够；聊天模型保持默认 3 秒即可
+        timeout=float(timeout_env) if timeout_env else None,
     )
 
 
