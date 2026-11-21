@@ -410,6 +410,16 @@ def get_order_detail(
         """,
         (order_id,),
     )
+    items = fetch_all(
+        """
+        SELECT id, cohort_id, order_item_status, item_name,
+               unit_price, discount_amount, payable_amount, service_period_days
+        FROM order_item
+        WHERE order_id = %s
+        ORDER BY id
+        """,
+        (order_id,),
+    )
     return ok(
         {
             "orderId": order["id"],
@@ -423,6 +433,20 @@ def get_order_detail(
                 "paymentStatusCode": payment["payment_status"] if payment else None,
                 "paidAt": format_datetime(payment["paid_at"]) if payment else None,
             },
+            "itemCount": len(items),
+            "items": [
+                {
+                    "orderItemId": int(row["id"]),
+                    "cohortId": int(row["cohort_id"]),
+                    "itemName": row["item_name"],
+                    "statusCode": row["order_item_status"],
+                    "unitPrice": money(row["unit_price"]),
+                    "discountAmount": money(row["discount_amount"]),
+                    "payableAmount": money(row["payable_amount"]),
+                    "servicePeriodDays": int(row["service_period_days"]),
+                }
+                for row in items
+            ],
             "refundSummary": {
                 "refundRequestCount": int(refund["refund_request_count"] or 0)
                 if refund

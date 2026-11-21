@@ -143,6 +143,32 @@ def test_get_order_detail(client, samples, user_headers):
     assert response.json()["data"]["orderId"] == order_id
 
 
+def test_get_order_detail_returns_items_with_ids(client, samples, user_headers):
+    """T0.2：详情要带 items，每条有 orderItemId——退款申请要靠它定位到具体课程。"""
+    user = samples.user_with_student
+    row = samples.on_sale_series_with_cohort
+    order_id = create_order(
+        client, user_headers, user["user_id"], user["student_id"], row["cohort_id"]
+    )
+    data = client.get(
+        f"/api/v1/orders/{order_id}", headers=user_headers(user["user_id"])
+    ).json()["data"]
+
+    assert data["itemCount"] >= 1
+    items = data["items"]
+    assert isinstance(items, list) and items
+    ids = [item["orderItemId"] for item in items]
+    assert len(set(ids)) == len(ids)
+    for item in items:
+        assert isinstance(item["orderItemId"], int) and item["orderItemId"] > 0
+        assert item["itemName"].strip()
+        assert item["statusCode"]
+        assert item["payableAmount"] is not None
+    # 订单金额是 items 的合计：这条不成立就说明 items 取错了单
+    total = sum(float(item["payableAmount"]) for item in items)
+    assert abs(total - float(data["payableAmount"])) < 0.01
+
+
 def test_post_order_cancel(client, samples, user_headers):
     user = samples.user_with_student
     row = samples.on_sale_series_with_cohort
