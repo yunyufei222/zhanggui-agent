@@ -13,18 +13,12 @@ from ..database import db_cursor, fetch_all, fetch_one
 from ..dependencies import get_current_user_id
 from ..errors import bad_request, conflict, not_found, unauthorized
 from ..response import ok
+from ..services.refund import REFUND_TYPES, create_refund
 from ..utils import count_total, format_datetime, local_now, make_no, money, offset_limit
 
 router = APIRouter(prefix="/api/v1", tags=["payments"])
 
 PAYMENT_CHANNELS = {"wechat_pay", "alipay", "bank_card"}
-REFUND_TYPES = {
-    "personal_reason",
-    "course_unsatisfied",
-    "schedule_conflict",
-    "duplicate_purchase",
-}
-
 
 class OrderPaymentCreateRequest(BaseModel):
     paymentChannelCode: str = Field(description="支付渠道编码。可选值：wechat_pay、alipay、bank_card。")
@@ -399,74 +393,20 @@ def create_refund_request(
     order_item_id: Annotated[int, Path(description="订单明细 ID。")],
     current_user_id: Annotated[int, Depends(get_current_user_id)],
 ):
-    if body.refundType not in REFUND_TYPES:
-        raise bad_request("INVALID_REFUND_TYPE", "退款类型不合法")
-    if body.applyAmount <= 0:
-        raise bad_request("INVALID_REFUND_AMOUNT", "申请退款金额必须大于 0")
-    item = ensure_order_item_owned(order_item_id, current_user_id)
-    if item["order_item_status"] not in {"paid", "completed"}:
-        raise conflict("ORDER_ITEM_NOT_REFUNDABLE", "订单明细当前状态不允许退款")
-    if body.applyAmount > Decimal(str(item["payable_amount"])):
-        raise conflict("REFUND_AMOUNT_EXCEEDED", "申请退款金额超过可退金额")
-    payment = fetch_one(
-        """
-        SELECT id
-        FROM payment_record
-        WHERE order_id = %s AND payment_status IN ('paid', 'partial_refunded', 'refunded')
-        ORDER BY id DESC
-        LIMIT 1
-        """,
-        (item["order_id"],),
+    """规则在 app.services.refund.create_refund —— 路由与 agent 共用同一份。"""
+    result = create_refund(
+        current_user_id,
+        order_item_id,
+        body.refundType,
+        body.refundReason,
+        body.applyAmount,
+        body.remark or "",
     )
-    if payment is None:
-        raise conflict("PAYMENT_NOT_FOUND", "订单没有可退款支付记录")
-    in_progress = fetch_one(
-        """
-        SELECT id
-        FROM refund_request
-        WHERE order_item_id = %s AND refund_status IN ('pending', 'approved')
-        LIMIT 1
-        """,
-        (order_item_id,),
-    )
-    if in_progress:
-        raise conflict("REFUND_IN_PROGRESS", "该订单明细存在处理中的退款申请")
-    now = local_now()
-    with db_cursor() as (_, cursor):
-        cursor.execute(
-            """
-            INSERT INTO refund_request (
-                institution_id, refund_no, order_id, order_item_id, payment_id,
-                user_id, student_id, refund_type, refund_reason, refund_status,
-                apply_amount, approved_amount, approver_user_id, remark, yn,
-                applied_at, approved_at, refunded_at, created_at, updated_at
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, 'pending',
-                %s, NULL, NULL, %s, 1, %s, NULL, NULL, %s, %s)
-            """,
-            (
-                item["institution_id"],
-                make_no("RF"),
-                item["order_id"],
-                order_item_id,
-                payment["id"],
-                current_user_id,
-                item["student_id"],
-                body.refundType,
-                body.refundReason,
-                body.applyAmount,
-                body.remark,
-                now,
-                now,
-                now,
-            ),
-        )
-        refund_id = cursor.lastrowid
-    row = fetch_one("SELECT refund_no FROM refund_request WHERE id = %s", (refund_id,))
     return ok(
         {
-            "refundRequestId": refund_id,
-            "refundNo": row["refund_no"] if row else None,
-            "refundStatusCode": "pending",
+            "refundRequestId": result["refundRequestId"],
+            "refundNo": result["refundNo"],
+            "refundStatusCode": result["refundStatusCode"],
         }
     )
 

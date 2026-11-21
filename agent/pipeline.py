@@ -21,6 +21,7 @@ from app.routers.kb import FALLBACK_ANSWER, STRONG_SCORE, search_rows
 
 from .intent import HttpLLM, classify
 from .skills import order as order_skill
+from .skills import refund as refund_skill
 from .skills import ticket as ticket_skill
 from .state import Session
 from .tasks import KIND_CN, TaskStack
@@ -198,6 +199,25 @@ def handle_turn(store: Store, user_id: int, message: str, session_key: str | Non
     result: dict[str, Any]
     if manual:
         result = _handoff(store, session, user_id, message, "ticket", session.slots.get("orderNo", ""), FALLBACK_ANSWER)
+
+    elif intent == "refund":
+        if not session.slots.get("orderNo"):
+            store.put_slot(key, "need", "orderNo", "ask")
+            result = {
+                "reply": order_skill.ask_with_recent(user_id),
+                "state": "filling",
+                "need": "orderNo",
+                "matched": False,
+            }
+        else:
+            outcome = refund_skill.apply(user_id, session.slots["orderNo"], message)
+            result = {
+                "reply": outcome["reply"],
+                "state": "filling" if outcome.get("need") else "answering",
+                "need": outcome.get("need"),
+                "matched": False,
+                "refundNo": outcome.get("refundNo"),
+            }
 
     elif intent in ("order", "refund") and session.slots.get("orderNo"):
         result = {
