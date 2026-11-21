@@ -40,6 +40,16 @@ def _check(data: dict[str, Any]) -> None:
         if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
             raise ConfigError(f"clarify.{key} 必须是字符串列表")
 
+    external = data.get("external") or {}
+    timeout = external.get("timeout_s", 3.0)
+    if not isinstance(timeout, (int, float)) or not (0 < timeout <= 30):
+        raise ConfigError(f"external.timeout_s 必须在 (0, 30] 之间，当前 {timeout!r}")
+    retries = external.get("retries", 1)
+    if not isinstance(retries, int) or not (0 <= retries <= 3):
+        raise ConfigError(f"external.retries 必须是 0~3 的整数，当前 {retries!r}")
+    if not str(external.get("degrade_text", "")).strip():
+        raise ConfigError("external.degrade_text 不能为空——降级时总得给人一句话")
+
     ticket = data.get("ticket") or {}
     sla = ticket.get("sla_hours", 4)
     if not isinstance(sla, int) or sla <= 0:

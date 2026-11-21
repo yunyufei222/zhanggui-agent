@@ -110,6 +110,10 @@ def _finish(
     prev_state: str | None = None,
 ) -> dict[str, Any]:
     """一轮的收尾：栈落盘 → answer → state → 助手那轮。"""
+    if getattr(verdict, "fallback", False):
+        result.setdefault("degraded", True)
+        store.trace(key, "degrade", "LLM 未给出可用结论，按规则继续")
+
     if result.get("need") and not result.get("action"):
         result["action"] = "clarify"
         result.setdefault("clarifyKind", "missing_param")

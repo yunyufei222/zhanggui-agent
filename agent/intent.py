@@ -47,6 +47,7 @@ class Intent:
     confidence: float
     source: str
     hits: list[str] = field(default_factory=list)
+    fallback: bool = False   # 问过 LLM 但没拿到可用结论 → 降级用规则
 
     def __str__(self) -> str:  # 方便写 trace
         return f"{self.intent}/{self.confidence:.2f}/{self.source}"
@@ -91,9 +92,11 @@ def classify(text: str, llm: ClassifyFn | None = None, threshold: float = 0.5) -
     try:
         guess = llm(text)
     except Exception:  # LLM 挂了不该影响对话
+        base.fallback = True
         return base
     if isinstance(guess, str) and guess.strip().lower() in INTENTS:
         return Intent(guess.strip().lower(), 0.6, "llm", hits)
+    base.fallback = True
     return base
 
 
@@ -104,11 +107,21 @@ class HttpLLM:
     走本机直连（ProxyHandler({})），不吃系统代理：代理进程不在时 urllib 会直接 10061。
     """
 
-    def __init__(self, base_url: str, api_key: str, model: str, timeout: float = 5.0) -> None:
+    def __init__(
+        self,
+        base_url: str,
+        api_key: str,
+        model: str,
+        timeout: float | None = None,
+        retries: int | None = None,
+    ) -> None:
+        from .skill_config import config
+
         self.base_url = base_url.rstrip("/")
         self.api_key = api_key
         self.model = model
-        self.timeout = timeout
+        self.timeout = float(timeout if timeout is not None else config.get("external.timeout_s", 3.0))
+        self.retries = int(retries if retries is not None else config.get("external.retries", 1))
         self.opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 
     def __call__(self, text: str) -> str | None:
@@ -127,11 +140,16 @@ class HttpLLM:
             headers={"content-type": "application/json", "authorization": "Bearer " + self.api_key},
             method="POST",
         )
-        try:
-            with self.opener.open(request, timeout=self.timeout) as response:
-                payload = json.loads(response.read().decode("utf-8"))
-            content = payload["choices"][0]["message"]["content"]
-        except Exception:
+        # 超时/断网只重试一次：再多也没用，反而把一轮对话拖长
+        for _attempt in range(self.retries + 1):
+            try:
+                with self.opener.open(request, timeout=self.timeout) as response:
+                    payload = json.loads(response.read().decode("utf-8"))
+                content = payload["choices"][0]["message"]["content"]
+                break
+            except Exception:  # noqa: BLE001 —— 归类失败不该变成对话失败
+                continue
+        else:
             return None
         word = str(content or "").strip().strip("。.!！`\"'").split()
         return word[0].lower() if word else None

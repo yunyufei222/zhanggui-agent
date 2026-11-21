@@ -314,6 +314,7 @@
         data.clarifyKind && `澄清 ${data.clarifyKind}`,
         data.state && `状态 ${data.state}`,
         data.intentSource && `来源 ${data.intentSource}`,
+        data.degraded && "已降级（外部服务慢/挂了）",
       ].filter(Boolean).join(" · ");
       bubble("bot", data.reply, meta);
       await refresh();

@@ -24,6 +24,7 @@ from pydantic import BaseModel, Field
 
 from app.database import fetch_one
 from app.response import ok
+from .skill_config import config
 
 router = APIRouter(prefix="/sim", tags=["sim"])
 
@@ -47,20 +48,32 @@ def _call(
         request.add_header("X-User-Id", str(user_id))
     for name, value in (headers or {}).items():
         request.add_header(name, value)
-    try:
-        with _OPENER.open(request, timeout=15) as response:
-            payload = response.read().decode("utf-8")
-            return json.loads(payload).get("data") if payload else None
-    except urllib.error.HTTPError as error:
-        detail = error.read().decode("utf-8")
-        raise HTTPException(
-            status_code=502,
-            detail=f"主应用返回 {error.code}：{detail[:200]}（主应用起了吗？{MAIN_BASE}）",
-        ) from error
-    except urllib.error.URLError as error:
-        raise HTTPException(
-            status_code=503, detail=f"连不上主应用 {MAIN_BASE}：{error.reason}（先跑 start-all.bat）"
-        ) from error
+    timeout = float(config.get("external.timeout_s", 3.0))
+    retries = int(config.get("external.retries", 1))
+    last_error: Exception | None = None
+    for _attempt in range(retries + 1):
+        try:
+            with _OPENER.open(request, timeout=timeout) as response:
+                payload = response.read().decode("utf-8")
+                return json.loads(payload).get("data") if payload else None
+        except urllib.error.HTTPError as error:
+            detail = error.read().decode("utf-8")
+            if error.code < 500:   # 4xx 重试没意义，直接告诉调用方
+                raise HTTPException(
+                    status_code=502,
+                    detail=f"主应用返回 {error.code}：{detail[:200]}",
+                ) from error
+            last_error = error
+        except (urllib.error.URLError, TimeoutError, OSError) as error:
+            last_error = error
+
+    if isinstance(last_error, urllib.error.HTTPError):
+        detail = last_error.read().decode("utf-8")
+        raise HTTPException(status_code=502, detail=f"主应用返回 {last_error.code}：{detail[:200]}")
+    raise HTTPException(
+        status_code=503,
+        detail=f"{config.get('external.degrade_text')}（{MAIN_BASE}：{getattr(last_error, 'reason', last_error)}）",
+    )
 
 
 class PaymentSim(BaseModel):
