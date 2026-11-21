@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import json
+import re
 import urllib.request
 from dataclasses import dataclass, field
 from typing import Callable
@@ -35,10 +36,22 @@ RULES: dict[str, tuple[tuple[str, float], ...]] = {
 
 ClassifyFn = Callable[[str], "str | None"]
 PROMPT = (
-    "判断用户这句话属于哪类意图，只回一个词，不要解释。"
-    "可选：order（查订单）/ refund（要退款）/ policy（问政策规则）/ course（问课程）/ "
-    "progress（问学习进度）/ human（要人工）/ greeting（打招呼）/ unknown。句子："
+    "Classify the user's intent. Reply with EXACTLY ONE token from this list and nothing else:\n"
+    "order | refund | policy | course | progress | human | greeting | unknown\n"
+    "No punctuation, no explanation, no Chinese. Sentence: "
 )
+
+# 推理模型常回中文（“支付/退款”），这里做一层同义词兜底，避免白名单把它全拒了
+ALIASES = {
+    "订单": "order", "查单": "order", "支付": "order", "付款": "order",
+    "退款": "refund", "退钱": "refund", "退课": "refund",
+    "政策": "policy", "规则": "policy", "时效": "policy",
+    "课程": "course", "选课": "course", "价格": "course",
+    "进度": "progress", "学习进度": "progress",
+    "人工": "human", "客服": "human", "真人": "human",
+    "问候": "greeting", "打招呼": "greeting",
+    "未知": "unknown", "其他": "unknown",
+}
 
 
 @dataclass
@@ -130,7 +143,8 @@ class HttpLLM:
                 "model": self.model,
                 "messages": [{"role": "user", "content": PROMPT + text}],
                 "temperature": 0,
-                "max_tokens": 8,
+                # 推理模型（如 deepseek-flash）先吐 reasoning_content，给少了 content 永远是空
+                "max_tokens": int(__import__("os").getenv("AGENT_LLM_MAX_TOKENS", "320")),
             },
             ensure_ascii=False,
         ).encode("utf-8")
@@ -145,11 +159,24 @@ class HttpLLM:
             try:
                 with self.opener.open(request, timeout=self.timeout) as response:
                     payload = json.loads(response.read().decode("utf-8"))
-                content = payload["choices"][0]["message"]["content"]
+                message = payload["choices"][0]["message"]
+                # 只认 content。reasoning_content 里带着提示词原文（列了所有枚举），
+                # 拿它做关键词匹配必然命中第一个词，等于每次都猜 order。
+                content = message.get("content") or ""
                 break
             except Exception:  # noqa: BLE001 —— 归类失败不该变成对话失败
                 continue
         else:
             return None
-        word = str(content or "").strip().strip("。.!！`\"'").split()
-        return word[0].lower() if word else None
+        text = str(content or "")
+        # 先在文本里找白名单词（英文），再退回中文同义词
+        lowered = text.lower()
+        for intent in INTENTS:
+            if intent == "unknown":
+                continue
+            if re.search(r"(?<![a-z])" + intent + r"(?![a-z])", lowered):
+                return intent
+        for word, intent in ALIASES.items():
+            if word in text:
+                return intent
+        return None

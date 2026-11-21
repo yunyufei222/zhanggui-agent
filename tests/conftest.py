@@ -3,8 +3,13 @@
 from __future__ import annotations
 
 from collections.abc import Generator
+import os
 from pathlib import Path
 import sys
+
+# 测试一律走规则、不联网：否则 .env 里一旦接了真 key，
+# 用例就会跟着模型的回答漂移（同样的句子今天 order 明天 refund）。
+os.environ["AGENT_LLM_ENABLED"] = "0"
 
 import pytest
 from fastapi.testclient import TestClient

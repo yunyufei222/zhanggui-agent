@@ -29,16 +29,17 @@ def _free_port() -> int:
 
 
 class StubLLM(BaseHTTPRequestHandler):
-    """只说一句话的假模型：不管问什么，都回 policy。"""
+    """可换答案的假模型：content / reasoning 由 REPLY 控制。"""
 
     calls = 0
+    REPLY = {"content": "policy"}
 
     def do_POST(self):  # noqa: N802 —— http.server 的命名约定
         StubLLM.calls += 1
         length = int(self.headers.get("content-length", "0"))
         body = json.loads(self.rfile.read(length) or b"{}")
         assert "messages" in body, "请求不是 OpenAI 兼容形状"
-        payload = json.dumps({"choices": [{"message": {"content": "policy"}}]}).encode("utf-8")
+        payload = json.dumps({"choices": [{"message": dict(StubLLM.REPLY)}]}).encode("utf-8")
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(payload)))
@@ -82,6 +83,42 @@ def test_client_parses_openai_shape(monkeypatch, stub):
     monkeypatch.setenv("AGENT_LLM_BASE_URL", stub)
     client = _build_llm()
     assert client("这句话该怎么归") == "policy"
+
+
+def test_english_answer_is_parsed(monkeypatch, stub):
+    monkeypatch.setenv("AGENT_LLM_ENABLED", "1")
+    monkeypatch.setenv("AGENT_LLM_API_KEY", "test-key")
+    monkeypatch.setenv("AGENT_LLM_BASE_URL", stub)
+    StubLLM.REPLY = {"content": "refund"}
+    try:
+        assert _build_llm()("我要退款") == "refund"
+    finally:
+        StubLLM.REPLY = {"content": "policy"}
+
+
+def test_chinese_answer_maps_via_alias(monkeypatch, stub):
+    """deepseek-flash 实测会回中文（“支付”），白名单不能把它全拒了。"""
+    monkeypatch.setenv("AGENT_LLM_ENABLED", "1")
+    monkeypatch.setenv("AGENT_LLM_API_KEY", "test-key")
+    monkeypatch.setenv("AGENT_LLM_BASE_URL", stub)
+    StubLLM.REPLY = {"content": "支付"}
+    try:
+        assert _build_llm()("付款") == "order"
+    finally:
+        StubLLM.REPLY = {"content": "policy"}
+
+
+def test_empty_content_does_not_parse_reasoning(monkeypatch, stub):
+    """推理模型 content 为空时，不能去扫 reasoning_content——那里有提示词原文，
+    列着所有枚举词，扫它必然命中 order，等于每次都猜 order。"""
+    monkeypatch.setenv("AGENT_LLM_ENABLED", "1")
+    monkeypatch.setenv("AGENT_LLM_API_KEY", "test-key")
+    monkeypatch.setenv("AGENT_LLM_BASE_URL", stub)
+    StubLLM.REPLY = {"content": "", "reasoning_content": "order | refund | policy | course ... 需要输出一个词"}
+    try:
+        assert _build_llm()("付款") is None
+    finally:
+        StubLLM.REPLY = {"content": "policy"}
 
 
 def test_chat_reports_llm_source(monkeypatch, stub, samples):

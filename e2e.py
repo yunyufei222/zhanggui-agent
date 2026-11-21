@@ -23,6 +23,8 @@ import urllib.error
 import urllib.request
 
 os.environ.setdefault("DB_PASSWORD", "123456")
+# 验收要确定性：不管 .env 里接没接模型，这里一律走规则（模型链路由 tests/test_llm_wiring.py 覆盖）
+os.environ["AGENT_LLM_ENABLED"] = "0"
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 if ROOT not in sys.path:
