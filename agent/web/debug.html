@@ -92,6 +92,12 @@
   <span class="badge" id="sessionBadge">未开会话</span>
   <span class="badge ok" id="healthBadge">连接中…</span>
   <span class="spacer"></span>
+  <label>模式
+    <select id="mode">
+      <option value="auto">auto（规则 + LLM 兜底）</option>
+      <option value="rule">rule（纯规则，不联网）</option>
+    </select>
+  </label>
   <label>userId <input id="userId" class="mono" value="161" size="8" /></label>
   <button class="ghost" id="newSession">新会话</button>
   <button class="ghost" id="refresh">刷新</button>
@@ -252,7 +258,12 @@
       const data = await api("/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userId: Number($("userId").value || 0), message: text, sessionKey }),
+        body: JSON.stringify({
+          userId: Number($("userId").value || 0),
+          message: text,
+          sessionKey,
+          mode: $("mode").value,
+        }),
       });
       sessionKey = data.sessionKey;
       $("sessionBadge").textContent = "会话 " + sessionKey;
@@ -263,6 +274,7 @@
         data.action && `action=${data.action}`,
         data.clarifyKind && `澄清 ${data.clarifyKind}`,
         data.state && `状态 ${data.state}`,
+        data.intentSource && `来源 ${data.intentSource}`,
       ].filter(Boolean).join(" · ");
       bubble("bot", data.reply, meta);
       await refresh();

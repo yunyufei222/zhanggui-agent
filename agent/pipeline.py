@@ -163,7 +163,14 @@ def _handoff(store: Store, session: Session, user_id: int, message: str, reason:
     }
 
 
-def handle_turn(store: Store, user_id: int, message: str, session_key: str | None = None) -> dict[str, Any]:
+def handle_turn(
+    store: Store,
+    user_id: int,
+    message: str,
+    session_key: str | None = None,
+    use_llm: bool = True,
+) -> dict[str, Any]:
+    """一轮对话。`use_llm=False` 时只用规则判定意图——M1 验收要证明三类意图不靠模型也能答。"""
     key = session_key or new_session_key()
     try:
         session = store.load(key)
@@ -176,7 +183,7 @@ def handle_turn(store: Store, user_id: int, message: str, session_key: str | Non
     store.append_turn(key, "user", message)
 
     manual = any(word in message for word in MANUAL_HINTS)
-    verdict = classify(message, LLM)
+    verdict = classify(message, LLM if use_llm else None)
     intent = "human" if manual else verdict.intent
     store.trace(key, "intent", f"{intent} conf={verdict.confidence:.2f} src={verdict.source}")
 

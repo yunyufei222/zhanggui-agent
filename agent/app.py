@@ -16,7 +16,7 @@ from fastapi.responses import HTMLResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 from .config import VERSION
-from .pipeline import handle_turn
+from .pipeline import LLM, handle_turn
 from .state import STATES, TRANSITIONS
 from .store import Store
 from app.database import fetch_one
@@ -58,6 +58,7 @@ def health() -> dict[str, object]:
         "version": VERSION,
         "db": "up" if db_up else "down",
         "skills": skills,
+        "llm": "on" if LLM else "off",
         "kbArticles": kb_articles,
         "openSessions": open_sessions,
         "states": list(STATES),
@@ -69,6 +70,10 @@ class ChatBody(BaseModel):
     message: str = Field(min_length=1, max_length=500)
     sessionKey: str | None = Field(default=None, max_length=64)
     userId: int | None = None
+    mode: str = Field(
+        default="auto",
+        description="auto=规则打底、拿不准再问 LLM；rule=纯规则，不联网、不依赖模型。",
+    )
 
 
 def _user_id(body: ChatBody, header: str | None) -> int:
@@ -86,7 +91,15 @@ def chat(
 ) -> dict[str, Any]:
     """一轮对话：判读 → 补槽/检索 → 作答或转人工；四表全落。"""
     store = Store()
-    result = handle_turn(store, _user_id(body, x_user_id), body.message, body.sessionKey)
+    if body.mode not in {"auto", "rule"}:
+        raise HTTPException(status_code=422, detail="mode 只能是 auto 或 rule")
+    result = handle_turn(
+        store,
+        _user_id(body, x_user_id),
+        body.message,
+        body.sessionKey,
+        use_llm=body.mode != "rule",
+    )
     return ok(result)
 
 
